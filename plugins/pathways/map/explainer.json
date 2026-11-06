@@ -1,0 +1,267 @@
+{
+  "version": 1,
+  "button": "How it works",
+  "prompt": {
+    "title": "New here?",
+    "body": "See how the map works.",
+    "start": "Show me",
+    "dismiss": "Not now"
+  },
+  "sections": [
+    {
+      "id": "landscape",
+      "title": "Landscape",
+      "status": "available",
+      "steps": [
+        {
+          "scene": "why",
+          "title": "Why a landscape",
+          "lines": [
+            "A list ranks.",
+            "A landscape shows neighbours, and gaps."
+          ],
+          "marks": {
+            "neighbours": "Neighbours",
+            "gap": "Gap"
+          }
+        },
+        {
+          "scene": "hill",
+          "title": "What's a hill",
+          "lines": [
+            "One hill, one market."
+          ],
+          "marks": {
+            "height": "Height",
+            "heightNote": "more evidence",
+            "width": "Width",
+            "widthNote": "more evidence, gently",
+            "flat": "no evidence yet"
+          }
+        },
+        {
+          "scene": "proximity",
+          "title": "Positioning",
+          "lines": [
+            "Related markets sit close.",
+            "Unrelated ones sit apart."
+          ],
+          "marks": {
+            "related": "Related",
+            "apart": "Apart"
+          }
+        },
+        {
+          "scene": "levels",
+          "title": "Two views",
+          "lines": [
+            "One hill per industry.",
+            "Its markets are the peaks."
+          ],
+          "marks": {
+            "industry": "Industry",
+            "market": "Market",
+            "industries": "Industries",
+            "markets": "Markets"
+          }
+        },
+        {
+          "scene": "height",
+          "title": "How height is made",
+          "lines": [
+            "Documents hold excerpts.",
+            "Each one adds a little less.",
+            "A new document lifts it again."
+          ],
+          "marks": {
+            "excerpt": "Excerpt"
+          }
+        },
+        {
+          "scene": "basemap",
+          "title": "The base map",
+          "lines": [
+            "First, the base map.",
+            "Flat, until evidence arrives."
+          ],
+          "note": "Sectors from GWI. Industries and markets defined by &go&co.",
+          "marks": {
+            "sector": "Sector",
+            "industry": "Industry"
+          }
+        },
+        {
+          "scene": "emergent",
+          "title": "Established and emergent",
+          "lines": [
+            "Most hills come from the base map.",
+            "New ones rise where documents point."
+          ],
+          "marks": {
+            "established": "Established",
+            "emergent": "Emergent"
+          }
+        }
+      ]
+    },
+    {
+      "id": "brand",
+      "title": "Brand",
+      "status": "later",
+      "lockedNote": "Coming soon"
+    },
+    {
+      "id": "uniqueness",
+      "title": "Uniqueness",
+      "status": "later",
+      "lockedNote": "Coming soon"
+    },
+    {
+      "id": "projects",
+      "title": "Your projects",
+      "status": "later",
+      "lockedNote": "Coming soon"
+    },
+    {
+      "id": "data",
+      "title": "How we use your data",
+      "status": "available",
+      "kind": "info",
+      "updated": "5 November 2026",
+      "contact": null,
+      "parts": [
+        {
+          "id": "privacy",
+          "title": "Privacy notice",
+          "blocks": [
+            {
+              "p": "This notice is for the people who sign in to the Pathways portal. It says what we hold about you, why, and for how long."
+            },
+            {
+              "h": "Who we are"
+            },
+            {
+              "p": "Parallel runs the portal with &go&co, our method partner, as one team, for your organisation and under our agreement with it. Your organisation decides who may sign in. To reach us about your data, ask the person at your organisation who invited you.",
+              "withContact": "Parallel runs the portal with &go&co, our method partner, as one team, for your organisation and under our agreement with it. Your organisation decides who may sign in. To reach us about your data, write to {contact}."
+            },
+            {
+              "h": "What we hold about you"
+            },
+            {
+              "ul": [
+                [
+                  "Your work email address,",
+                  " added at your organisation's request, with when and why you were added, by whom, and when your access ends. It's how you sign in, and how the portal knows you're allowed in."
+                ],
+                [
+                  "Sign-in records:",
+                  " when you sign in or fail to, and from which network address and country. Cloudflare Access, our sign-in service, keeps these."
+                ]
+              ]
+            },
+            {
+              "p": "Nothing else. There are no passwords, and no analytics, advertising or tracking."
+            },
+            {
+              "h": "Cookies"
+            },
+            {
+              "p": "Cloudflare Access sets only the cookies it needs to sign you in and keep you signed in, such as CF_Authorization. None are for analytics or advertising. A sign-in lasts up to 24 hours; then you sign in again."
+            },
+            {
+              "p": "The map also remembers a few display choices in your browser, such as the colour scale and how far you've got in How it works. They stay on your device and are never sent to us."
+            },
+            {
+              "h": "Why we hold it"
+            },
+            {
+              "ul": [
+                "To let only the people your organisation has approved in.",
+                "To keep the portal and your organisation's information secure, and to look into misuse."
+              ]
+            },
+            {
+              "p": "We do this because we have a legitimate interest in keeping the portal secure, and to provide the service your organisation has asked us for. We don't use your data for anything else, and we don't sell it or share it with anyone else."
+            },
+            {
+              "h": "Who can see it"
+            },
+            {
+              "ul": [
+                "Our team: Parallel and &go&co. Only Parallel's admins manage who can sign in.",
+                "Cloudflare, which runs the portal and its sign-in for us and stores your data in North America, under its data protection terms. It's listed under Services we use."
+              ]
+            },
+            {
+              "p": "The portal runs no AI, and sends nothing about you to any AI service."
+            },
+            {
+              "h": "How long we keep it"
+            },
+            {
+              "ul": [
+                "Your portal account: until 12 months after the engagement ends, or sooner if your organisation asks.",
+                "Cloudflare's sign-in records: for a short period, under Cloudflare's terms."
+              ]
+            },
+            {
+              "h": "Your rights"
+            },
+            {
+              "p": "You can ask to see, correct or delete what we hold about you, or object to or limit how we use it. Ask the person at your organisation who invited you. You can also complain to your data protection regulator: in the UK, the Information Commissioner's Office.",
+              "withContact": "You can ask to see, correct or delete what we hold about you, or object to or limit how we use it. Write to {contact}, or ask the person at your organisation who invited you. You can also complain to your data protection regulator: in the UK, the Information Commissioner's Office."
+            },
+            {
+              "h": "Changes"
+            },
+            {
+              "p": "If this notice changes, so does the date at the top."
+            }
+          ]
+        },
+        {
+          "id": "services",
+          "title": "Services we use",
+          "blocks": [
+            {
+              "p": "Parallel and &go&co work on Pathways as one team. These are the outside services that handle your organisation's documents and the portal's data, what each holds, and where."
+            },
+            {
+              "table": {
+                "head": [
+                  "Service",
+                  "What it does",
+                  "What it holds",
+                  "Where"
+                ],
+                "rows": [
+                  [
+                    "Cloudflare",
+                    "Storage, database, the portal and its sign-in",
+                    "Your organisation's documents, our findings, published versions of the map, portal users and sign-in records",
+                    "North America; the portal itself runs on Cloudflare's global network"
+                  ],
+                  [
+                    "Anthropic",
+                    "Claude reads documents and drafts findings, in our team's working sessions",
+                    "What passes through those sessions. Each of us uses our own Claude account with model training switched off. Anthropic keeps conversations for up to 30 days, longer if one is flagged for a safety review",
+                    "United States"
+                  ],
+                  [
+                    "&go&co",
+                    "Our method partner and part of our team, as our subcontractor",
+                    "Your organisation's documents and our findings, on encrypted laptops",
+                    "Their team's own encrypted laptops"
+                  ]
+                ]
+              }
+            },
+            {
+              "p": "GitHub holds our code only, never your organisation's documents or the portal's data, so it isn't on this list. We'll tell your organisation before we add or change a service."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
