@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pathways · How the landscape works</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<!--
+  The landscape explainer, drawn with the map's own renderer: the same shader (goandco ramp, hillshade,
+  contours, grid floor), the same orthographic camera and the same label pills. Every hill here is made up;
+  no client data. The story is the seven boards on the explainer canvas. Served at /explainer-scenes.
+-->
+<style>
+  :root{
+    --ground:#003830; --ink:rgba(255,255,255,.94); --ink-dim:rgba(255,255,255,.6);
+    --accent:#fff; --on-accent:#000; --label-ink:#fff;
+    --panel-line:color-mix(in srgb, var(--accent) 22%, transparent);
+    --off:color-mix(in srgb, var(--accent) 5%, transparent);
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+    --radius:8px; --radius-in:5px;
+  }
+  /* the map's light theme (lagoon): dark ink on a pale floor */
+  :root[data-light]{--ink:rgba(0,0,0,.88);--ink-dim:rgba(0,0,0,.58);--label-ink:#000;
+    --panel-line:color-mix(in srgb, var(--ink) 18%, transparent)}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--ground);color:var(--ink);font-family:var(--sans);overflow:hidden;-webkit-user-select:none;user-select:none}
+  #stage{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+  #fx,#marks{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+  #marks{width:100%;height:100%}
+
+  /* labels: the map's pills, anchored at the dot on the peak */
+  .label{position:absolute;left:0;top:0;transform:translate(-50%,-100%);white-space:nowrap;
+    display:flex;flex-direction:column;align-items:center;gap:3px;padding:2px 4px 3px;transition:opacity .5s}
+  .label .txt{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em;color:var(--label-ink);
+    text-shadow:0 0 3px var(--ground),0 0 1px var(--ground);padding:4px 11px;border-radius:999px;transition:all .4s}
+  .label .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);transition:transform .45s cubic-bezier(.3,1.6,.5,1)}
+  .label.emergent .txt{font-style:italic}
+  .label.emergent .dot{width:8px;height:7px;border-radius:0;clip-path:polygon(50% 0,100% 100%,0 100%)}
+  .label.small .dot{width:5px;height:5px}
+  .label.lozenge .txt{border:1px solid var(--panel-line);color:var(--ink-dim);text-shadow:none;letter-spacing:.08em;text-transform:uppercase;font-size:10px}
+  .label.lozenge .dot{display:none}
+  .label.active .txt{background:var(--label-ink);color:var(--on-accent);text-shadow:none;font-weight:600}
+  .label.hidden{opacity:0}
+  .label.hidden .dot{transform:scale(0)}
+  .tag{position:absolute;left:0;top:0;transform:translate(-50%,-50%);font-family:var(--mono);font-size:11px;font-weight:600;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--ink);text-shadow:0 0 4px var(--ground),0 0 2px var(--ground);
+    white-space:nowrap;transition:opacity .5s;text-align:center;line-height:1.5}
+  .tag small{display:block;font-weight:400;letter-spacing:.04em;text-transform:none;color:var(--ink-dim);font-size:11px}
+  .tag.hidden{opacity:0}
+  /* a document marker: the map's doc hub, a solid dot carrying a document icon */
+  .hub{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;display:grid;place-items:center;
+    background:var(--label-ink);color:var(--ground);box-shadow:0 0 0 4px color-mix(in srgb, var(--label-ink) 22%, transparent);transition:opacity .4s,transform .4s}
+  .hub svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .hub.hidden{opacity:0;transform:scale(.4)}
+  .spark{position:absolute;left:0;top:0;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 8px color-mix(in srgb, var(--accent) 80%, transparent)}
+
+  /* caption: few words, top left, like the map's chrome */
+  .caption{position:absolute;left:28px;top:24px;max-width:min(560px,calc(100vw - 56px));pointer-events:none}
+  .caption .step{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:10px}
+  .caption .line{font-size:clamp(20px,3vw,28px);font-weight:600;line-height:1.2;letter-spacing:-.01em;transition:opacity .35s,transform .35s;
+    text-shadow:0 0 12px var(--ground)}
+  .caption .line.out{opacity:0;transform:translateY(-6px)}
+  .caption .note{margin-top:8px;font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--ink-dim);transition:opacity .4s}
+
+  /* the map's tabs, used for the level switch mock and the player */
+  .tabs{display:flex;gap:3px;padding:3px;background:var(--off);border:1px solid var(--panel-line);border-radius:var(--radius);backdrop-filter:blur(8px)}
+  .tab{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:color-mix(in srgb, var(--accent) 66%, transparent);background:none;border:0;border-radius:var(--radius-in);padding:7px 13px;cursor:pointer;transition:color .15s,background .15s}
+  .tab[aria-selected="true"]{background:var(--accent);color:var(--on-accent)}
+  .mock{position:absolute;right:28px;top:24px;pointer-events:none;transition:opacity .4s}
+  .mock.hidden{opacity:0}
+  @media (max-width:600px){ .mock{top:auto;bottom:72px;right:50%;transform:translateX(50%)} }   /* clear of the caption on a phone */
+
+  .player{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);display:flex;align-items:center;gap:8px}
+  .player button.nav{display:grid;place-items:center;width:36px;height:36px;padding:0;cursor:pointer;color:var(--ink);
+    background:var(--off);border:1px solid var(--panel-line);border-radius:var(--radius);backdrop-filter:blur(8px)}
+  .player button.nav:hover{border-color:var(--accent)}
+  .player button.nav:focus-visible,.dots button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .player svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .dots{display:flex;gap:4px;padding:3px;background:var(--off);border:1px solid var(--panel-line);border-radius:var(--radius);backdrop-filter:blur(8px)}
+  .dots button{width:28px;height:28px;border:0;border-radius:var(--radius-in);background:none;cursor:pointer;
+    font-family:var(--mono);font-size:11px;font-weight:600;color:color-mix(in srgb, var(--accent) 66%, transparent)}
+  .dots button[aria-current="true"]{background:var(--accent);color:var(--on-accent)}
+  /* inside the map's pop-up: the pop-up lists the steps, so the numbered dots go; the caption sits a little tighter */
+  body.embed .dots{display:none}
+  body.embed .caption{left:22px;top:20px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <svg id="marks" aria-hidden="true"></svg>
+  <div id="fx" aria-hidden="true"></div>
+  <div class="caption" aria-live="polite">
+    <div class="step" id="step"></div>
+    <div class="line" id="line"></div>
+    <div class="note" id="note"></div>
+  </div>
+  <div class="mock hidden" id="mock">
+    <div class="tabs" role="presentation">
+      <span class="tab" data-l="industries" aria-selected="true">Industries</span>
+      <span class="tab" data-l="markets" aria-selected="false">Markets</span>
+    </div>
+  </div>
+  <nav class="player" aria-label="Explainer">
+    <button class="nav" id="prev" type="button" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div class="dots" id="dots"></div>
+    <button class="nav" id="replay" type="button" aria-label="Replay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+    <button class="nav" id="next" type="button" aria-label="Next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+  </nav>
+</div>
+<script src="explainer-scenes.js"></script>
+</body>
+</html>

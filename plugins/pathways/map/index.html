@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<title>Pathways · Wellness landscape</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+  :root{
+    --ground:#003830;         /* the floor colour: goandco's first stop (landscape v2 default) */
+    --panel:rgba(20,10,30,.74);
+    --sidebar:color-mix(in srgb, color-mix(in srgb, var(--ground) 95%, #fff) 72%, transparent);   /* the theme panel: the floor plus 5% white, as glass */
+    --glass-tone:.85;         /* the map behind the glass is dimmed on dark scales (lifted on light) to keep the text legible */
+    --panel-line:color-mix(in srgb, var(--accent) 22%, transparent);
+    --ink:rgba(255,255,255,.94);   /* text: white / black at an opacity, never a tint, so it sits on any colour scale */
+    --ink-dim:rgba(255,255,255,.6);
+    --accent:#fff;            /* UI chrome: white on dark scales, black on light (applyRamp) */
+    --on-accent:#000;         /* text on an accent fill */
+    --off:color-mix(in srgb, var(--accent) 5%, transparent);   /* unselected controls: 5% white or black */
+    --label-ink:#fff;
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+    --radius:8px;             /* controls and the panel; what sits inside them is rounded concentrically */
+    --radius-in:5px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);
+    font-family:var(--sans);overflow:hidden;
+    -webkit-user-select:none;user-select:none;
+  }
+  #app{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+  canvas.dragging{cursor:grabbing}
+
+  /* ---- overlay chrome ---- */
+  .overlay{position:absolute;pointer-events:none;z-index:5}
+  .overlay > *{pointer-events:auto}
+
+  .topbar{top:0;left:0;right:0;display:flex;justify-content:space-between;
+    align-items:flex-start;gap:16px;padding:20px 22px}
+  .topbar-left{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+  .tabs{display:flex;gap:3px;padding:3px;background:var(--off);border:1px solid var(--panel-line);
+    border-radius:var(--radius);backdrop-filter:blur(8px)}
+  .tab{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:color-mix(in srgb, var(--accent) 66%, transparent);background:none;border:0;border-radius:var(--radius-in);padding:7px 13px;cursor:pointer;
+    transition:color .15s,background .15s}
+  .tab:hover{color:var(--accent)}
+  .tab[aria-selected="true"]{background:var(--accent);color:var(--on-accent)}
+  .tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .topright{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+
+  .controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  button.ctl{
+    font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink);
+    background:var(--off);border:1px solid var(--panel-line);
+    border-radius:var(--radius);padding:8px 12px;cursor:pointer;
+    backdrop-filter:blur(8px);transition:border-color .15s,color .15s,background .15s}
+  button.ctl:hover{border-color:var(--accent);color:var(--accent)}
+  button.ctl[aria-pressed="true"]{border-color:var(--accent);color:var(--on-accent);
+    background:var(--accent)}
+  button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---- controls dock: an accordion in the bottom left, Theme and Terrain tabs ---- */
+  .dock[hidden]{display:none !important}
+  .dock{left:22px;bottom:20px;width:248px;display:flex;flex-direction:column;
+    background:var(--panel);border:1px solid var(--panel-line);border-radius:var(--radius);backdrop-filter:blur(8px)}
+  .dock-head{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;
+    font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);
+    background:none;border:0;padding:9px 12px;cursor:pointer}
+  .dock-head:hover{color:var(--accent)}
+  .dock-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .dock-head .chev{transition:transform .2s}
+  .dock-head[aria-expanded="true"] .chev{transform:rotate(180deg)}
+  .dock-body{border-bottom:1px solid var(--panel-line);padding:10px 12px 12px;
+    max-height:calc(100vh - 200px);overflow:auto}
+  .dock-body[hidden],.dock-pane[hidden]{display:none}
+  .dock-tabs{margin-bottom:12px;background:none;border:0;padding:0;backdrop-filter:none}
+  .dock-tabs .tab{flex:1}
+
+  /* ---- camera: a map-style stack in the bottom right, zoom at the foot ---- */
+  .camera{right:22px;bottom:20px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+  .cam-btn{display:grid;place-items:center;width:36px;height:36px;padding:0;cursor:pointer;
+    font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink);
+    background:var(--off);border:1px solid var(--panel-line);border-radius:var(--radius);backdrop-filter:blur(8px);
+    transition:border-color .15s,color .15s,background .15s}
+  .cam-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .cam-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .cam-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .cam-btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+  #compass path{stroke:none;fill:currentColor;opacity:.45}
+  #compass path.n{opacity:1}
+  .cam-zoom{display:flex;flex-direction:column;border:1px solid var(--panel-line);border-radius:var(--radius);overflow:hidden;
+    background:var(--off);backdrop-filter:blur(8px)}
+  .cam-zoom .cam-btn{border:0;border-radius:0;background:none;backdrop-filter:none}
+  .cam-zoom .cam-btn + .cam-btn{border-top:1px solid var(--panel-line)}
+  .legend .lbl{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10px;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:8px}
+  .legend .n{color:var(--accent);letter-spacing:.04em}
+  .industry-legend{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+  .industry-legend li{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:9.5px;
+    letter-spacing:.04em;color:var(--ink-dim);line-height:1.3}
+  .industry-legend .swatch{width:8px;height:8px;border-radius:1px;flex:none}
+  .industry-legend .cnt{margin-left:auto;color:var(--accent);font-variant-numeric:tabular-nums}
+  /* steps: 1 Structure · 2 Signal · 3 Uniqueness */
+  .tabs .tab .ico{width:13px;height:13px;margin:-2px 6px 0 0;vertical-align:middle;fill:none;stroke:currentColor;
+    stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .subset-tabs[hidden],.rule-tabs[hidden],.plays[hidden]{display:none}
+  .label[data-layer="emergent"] .txt{font-style:italic}
+  .label[data-layer="emergent"] .dot{width:8px;height:7px;border-radius:0;
+    clip-path:polygon(50% 0,100% 100%,0 100%)}                  /* a solid triangle marks a new (emergent) theme */
+  /* light themes (ember, orchid): dark ink on a pale floor */
+  :root[data-light]{--ink:rgba(0,0,0,.88);--ink-dim:rgba(0,0,0,.58);--label-ink:#000;--panel:rgba(255,255,255,.78);--sidebar:color-mix(in srgb, color-mix(in srgb, var(--ground) 95%, #000) 72%, transparent);--glass-tone:1.1;
+    --panel-line:color-mix(in srgb, var(--ink) 18%, transparent);
+    --v-leader:#1f9d55;--v-leader-potential:#5fa82a;--v-whitespace:#c99700;--v-conditional:#d9730d;--v-follower-risk:#d6323a;--v-avoid:#8a8494;--v-unscored:#c9c4d1}
+  :root[data-light] .related .bar{background:rgba(0,0,0,.08)}
+  :root[data-light] .labels.dim .label:not(.active):not(.related):not(.hover){opacity:.45}
+  :root[data-light] .bubbles.dim .b:not(.active):not(.related):not(.hover) .inner{opacity:.4}
+  :root{--v-leader:#3ddc84;--v-leader-potential:#a6e86b;--v-whitespace:#ffd34d;--v-conditional:#ffa64d;--v-follower-risk:#ff5a5f;--v-avoid:#7a7486;--v-unscored:#4b4556}
+  .label[data-verdict] .dot{width:9px;height:9px}
+  .label[data-verdict="leader"] .dot{background:var(--v-leader)} .label[data-verdict="leader-potential"] .dot{background:var(--v-leader-potential)}
+  .label[data-verdict="whitespace"] .dot{background:var(--v-whitespace)} .label[data-verdict="conditional"] .dot{background:var(--v-conditional)}
+  .label[data-verdict="follower-risk"] .dot{background:var(--v-follower-risk)} .label[data-verdict="avoid"] .dot{background:var(--v-avoid)}
+  .label[data-verdict="unscored"] .dot{background:var(--v-unscored)} .label[data-verdict="unscored"] .txt{opacity:.5}
+  .label[data-nodemand]:not(.hover):not(.active) .txt{opacity:.4}
+  .bubbles .b[data-verdict="leader"] .outer{stroke:var(--v-leader)} .bubbles .b[data-verdict="leader-potential"] .outer{stroke:var(--v-leader-potential)}
+  .bubbles .b[data-verdict="whitespace"] .outer{stroke:var(--v-whitespace)} .bubbles .b[data-verdict="conditional"] .outer{stroke:var(--v-conditional)}
+  .bubbles .b[data-verdict="follower-risk"] .outer{stroke:var(--v-follower-risk)} .bubbles .b[data-verdict="avoid"] .outer{stroke:var(--v-avoid)}
+  .bubbles .b[data-verdict="unscored"] .outer{stroke:var(--v-unscored)}
+  .bubbles .b[data-verdict] .outer{stroke-width:3;opacity:1}
+  .bubbles .b[data-verdict="unscored"] .outer{stroke-width:1}
+  .bubbles .b[data-verdict]:not(.active):not(.related) .inner{stroke:none}   /* let the verdict ring read cleanly */
+  .verdict-chip{display:inline-block;padding:2px 7px;border-radius:2px;font-family:var(--mono);font-size:10px;color:#111;margin-right:6px}
+  .plays{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:12px;line-height:1.45}
+  .plays .why{color:var(--ink-dim)} .plays .jv{font-style:italic}
+  .mcard{display:flex;flex-direction:column;gap:14px;font-size:12.5px;line-height:1.45}
+  .mcard .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .mcard .tile{border:1px solid var(--panel-line);border-radius:8px;padding:10px 12px}
+  .mcard .tile .k{font-size:11px;color:var(--ink-dim)} .mcard .tile .v{font-size:26px;font-weight:600;line-height:1.15;margin:2px 0}
+  .mcard .tile .t{font-size:11.5px;color:var(--ink-dim)}
+  .mcard .head{border:1px solid color-mix(in srgb, var(--v-conditional) 60%, transparent);background:color-mix(in srgb, var(--v-conditional) 12%, transparent);border-radius:8px;padding:10px 12px}
+  .mcard h4{margin:0 0 6px;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+  .mcard .bar{display:grid;grid-template-columns:78px 1fr 36px;align-items:center;gap:8px;margin:3px 0}
+  .mcard .bar .track{height:6px;border-radius:3px;background:color-mix(in srgb, var(--ink-dim) 22%, transparent);overflow:hidden}
+  .mcard .bar .fill{height:100%;border-radius:3px;background:#8fb4ff}
+  .mcard table{width:100%;border-collapse:collapse} .mcard td,.mcard th{padding:4px 4px 4px 0;text-align:left;vertical-align:top}
+  .mcard td{font-size:12px} .mcard th{font-weight:400;color:var(--ink-dim);font-size:11px} .mcard td.n{font-variant-numeric:tabular-nums}
+  .mcard td.dim{min-width:96px}
+  .mcard .box{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--panel-line);border-radius:999px;padding:1px 8px;white-space:nowrap;font-size:11.5px}
+  .mcard .box i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .mcard .lead{display:flex;justify-content:space-between;gap:10px;margin:3px 0} .mcard .lead .s{color:var(--ink-dim);text-align:right}
+  .mcard .dim{color:var(--ink-dim)}
+  .mcard .lowconf{display:inline-block;margin-left:6px;font-size:.6em;vertical-align:super;color:var(--v-conditional);cursor:help}
+  .mcard .lead .s .lowconf{margin:0 5px 0 0;font-size:.9em;vertical-align:baseline}
+  .brand-dna{font-family:var(--mono);font-size:9.5px;line-height:1.5;margin-top:8px;color:var(--ink-dim)}
+  .ramp{height:8px;border-radius:1px;margin-bottom:5px;cursor:pointer}
+  .ramp:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .ramp-ends{display:flex;justify-content:space-between;font-family:var(--mono);
+    font-size:10px;color:var(--ink-dim)}
+
+  .minimap{margin-top:12px}
+  .minimap .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-dim);margin-bottom:8px}
+  .minimap canvas{display:block;width:100%;height:auto;aspect-ratio:1;border:1px solid var(--panel-line);border-radius:1px}
+  @media (max-width:640px){ .minimap{display:none} }
+
+  .eroder .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-dim);margin-bottom:10px}
+  .eroder .row{margin-bottom:9px}
+  .eroder label{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:10px;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:3px}
+  .eroder .n{color:var(--accent);letter-spacing:0}
+  .eroder input{width:100%;margin:0;accent-color:var(--accent);cursor:pointer}
+  .ramps{display:flex;gap:7px;align-items:center;margin-top:10px}
+  .rchip{width:22px;height:22px;padding:2px;border-radius:50%;background:none;cursor:pointer;
+    border:2px solid transparent;transition:border-color .15s,transform .15s}
+  .rchip i{display:block;width:100%;height:100%;border-radius:50%}
+  .rchip:hover{transform:scale(1.12)}
+  .rchip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .rchip[aria-pressed="true"]{border-color:var(--ink)}
+  .ramp-default{margin-top:10px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--accent);background:none;border:1px solid var(--panel-line);border-radius:999px;padding:4px 10px;cursor:pointer}
+  .ramp-default:hover:not(:disabled){border-color:var(--accent)}
+  .ramp-default:disabled{color:var(--ink-dim);cursor:default}
+  .ramp-default:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+
+  /* ---- projected theme labels ---- */
+  /* ---- first load: the controls fade up, a loader sits in the middle, labels wait for the terrain ---- */
+  @keyframes uiFadeUp{from{opacity:0}to{opacity:1}}
+  #app.booting .overlay{animation:uiFadeUp 2s ease-in-out both}
+  .labels,.range-labels{transition:opacity .9s ease}
+  #app.intro .range-labels{opacity:0}
+  .labels.flat,.bubbles{transition:opacity .2s ease}
+  .labels.swap,.bubbles.swap{opacity:0}                                    /* the bubbles pane changing level */
+  #app.view-fx .labels,#app.view-fx .range-labels{transition:none}   /* Terrain ⇄ Bubbles drives their fades a frame at a time */
+  /* mid-intro each label waits for its hill to reach full height, then builds on: fades up, rises, its dot pops */
+  #app.intro .label,.labels.build .label{transition:opacity .6s ease}
+  #app.intro .label .txt,.labels.build .label .txt{transition:transform .6s cubic-bezier(.2,.7,.2,1)}
+  #app.intro .label .dot,.labels.build .label .dot{transition:transform .45s cubic-bezier(.3,1.6,.5,1)}
+  #app.intro .label:not(.grown),.labels.build .label:not(.grown):not(.leaving){opacity:0}
+  #app.intro .label:not(.grown) .txt,.labels.build .label:not(.grown):not(.leaving) .txt{transform:translateY(6px)}
+  #app.intro .label:not(.grown) .dot,.labels.build .label:not(.grown):not(.leaving) .dot{transform:scale(0)}
+  /* while a new layout rolls in, the old layout's labels bow out as the roll reaches them */
+  .label.leaving{pointer-events:none}
+  .labels.build .label.leaving{transition:opacity .35s ease}
+  .label.leaving.gone{opacity:0}
+  .label.leaving.gone .txt{transform:translateY(-6px)}
+  .label.leaving.gone .dot{transform:scale(0)}
+  .range-labels.build{opacity:0}
+  .loader{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:7;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center;gap:10px;transition:opacity .5s ease}
+  .loader.done{opacity:0}
+  .loader-text{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink);
+    text-shadow:0 0 6px var(--ground),0 0 12px var(--ground)}   /* legible over the contours drawing on behind it */
+  @keyframes loaderText{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  .loader-text.swap{animation:loaderText .35s ease}
+  .loader-bar{width:160px;height:2px;border-radius:1px;overflow:hidden;background:var(--off)}
+  .loader-bar i{display:block;width:100%;height:100%;background:var(--accent);transform:scaleX(0);transform-origin:left}
+  @media (prefers-reduced-motion: reduce){ #app.booting .overlay{animation:none} .loader-text.swap{animation:none} }
+  .labels{position:absolute;top:0;bottom:0;left:0;width:100%;z-index:4;overflow:hidden;pointer-events:none}
+  .labels.flat .label .dot{display:none}
+  /* where a selected document's arcs fan out: a solid dot carrying a document icon */
+  .doc-hub{position:absolute;left:0;top:0;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+    background:var(--label-ink);color:var(--ground);box-shadow:0 0 0 4px color-mix(in srgb, var(--label-ink) 22%, transparent);pointer-events:none;z-index:1}
+  .doc-hub svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .labels.flat .label{pointer-events:none}     /* in the bubbles view the circles take the clicks */
+  .divider{position:absolute;top:0;bottom:0;width:1px;background:var(--panel-line);z-index:4;pointer-events:none;display:none}
+  /* anchored at the dot, which sits on the peak; the name floats just above it */
+  .label{position:absolute;left:0;top:0;transform:translate(-50%,-100%);
+    white-space:nowrap;will-change:transform;pointer-events:auto;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+    background:none;border:0;margin:0;padding:2px 4px 3px;font:inherit;color:inherit}
+  /* every label wears the same ink (white on the dark scales, black on the light ones); a soft halo in the
+     floor colour keeps it legible on the bright peaks. Hover and the selected theme invert it into a pill. */
+  .label .txt,.range-label .txt{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em;color:var(--label-ink);
+    text-shadow:0 0 3px var(--ground),0 0 1px var(--ground);
+    padding:4px 11px;border-radius:999px;transition:background-color .15s,color .15s}
+  .label .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);transition:transform .15s}   /* a solid dot, no ring */
+  /* hover is shared by theme across the panes (setHover), so a split view lights the same theme on both sides */
+  .label.hover .txt,.label.active .txt{background:var(--label-ink);color:var(--on-accent);text-shadow:none}
+  .label.hover,.label.active{z-index:2}
+  .label:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+  .label.active .txt{font-weight:600}
+  .label.active .dot{background:var(--accent);transform:scale(1.35)}
+
+  /* ---- side panel: theme metadata + connections ---- */
+  /* floats clear of the edges, inset like the other controls (20px top and bottom, 22px at the side) */
+  .panel{position:absolute;top:0;right:0;bottom:0;width:min(var(--panel-w,560px),100vw);z-index:6;
+    background:var(--sidebar);backdrop-filter:blur(28px) saturate(1.8) brightness(var(--glass-tone));
+    -webkit-backdrop-filter:blur(28px) saturate(1.8) brightness(var(--glass-tone));
+    border:1px solid var(--panel-line);border-radius:var(--radius);
+    display:flex;flex-direction:column;gap:32px;
+    padding:22px 22px 28px;overflow-y:auto;transform:translateX(calc(100% + 30px));
+    transition:transform .35s cubic-bezier(.2,.7,.2,1)}
+  .panel.open{transform:none}
+  .panel{border-radius:0;border-width:0 0 0 1px}
+  .panel-resize{position:absolute;top:0;bottom:0;right:var(--panel-w,560px);width:10px;transform:translateX(50%);z-index:7;cursor:col-resize;display:none;touch-action:none}
+  .panel-resize::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;background:var(--accent);opacity:0;transition:opacity .15s}
+  .panel-resize:hover::after,.panel-resize:focus-visible::after,.panel-resize.dragging::after{opacity:.7}
+  .panel-resize:focus-visible{outline:none}
+  #app.panel-open .panel-resize{display:block}
+  #app.resizing,#app.resizing *{cursor:col-resize !important;user-select:none}
+  #app.resizing .panel{transition:none}
+  @media (max-width:640px){ #app.panel-open .panel-resize{display:none} }
+  .panel > *{flex:none;margin:0}
+  .panel > [hidden]{display:none}
+  .panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}
+  .chip{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);border-radius:999px;padding:3px 9px}
+  /* the map's markers, in the panel too: a solid circle for a structure theme, a solid triangle for an emergent one */
+  /* the key, under the level toggle: the terrain marks its themes with a circle or a triangle; the bubbles say it
+     with a dashed outline for an emergent theme. Split shows both. */
+  .map-key{display:flex;gap:14px;margin:2px 4px 0 0;padding:0;list-style:none;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:color-mix(in srgb, var(--accent) 66%, transparent);
+    text-shadow:0 0 3px var(--ground)}
+  .map-key li{display:flex;align-items:center;gap:7px}
+  .map-key .mark{background:currentColor}
+  .map-key .emergent{font-style:italic}
+  .map-key .swatch{width:10px;height:10px;border-radius:50%;border:1px solid currentColor;
+    background:color-mix(in srgb, currentColor 38%, transparent)}
+  .map-key .swatch.dense{border-style:dashed}   /* a dashed outline, as the bubbles */
+  .bubbles .b[data-layer="emergent"] .inner,.bubbles .b[data-layer="emergent"] .outer{stroke-dasharray:4 3}   /* emergent: the same outline, dashed */
+  .map-key .k-bubbles{display:none}
+  #app.tab-2d .map-key .k-bubbles,#app.tab-split .map-key .k-bubbles{display:flex}
+  #app.tab-2d .map-key .k-terrain{display:none}
+  /* in Split each side has its own level toggle, under the top bar at its top left; the single one hides */
+  .pane-level{position:absolute;z-index:5;top:calc(var(--topbar-h, 76px) - 8px);display:none}
+  #app.tab-split .pane-level{display:flex}
+  #app.tab-split .topright .level-tabs,#app.view-fx .pane-level{display:none}
+  @media (max-width:560px){ .pane-level .ico{display:none} .pane-level .tab{padding:7px 8px;letter-spacing:.04em} }
+  .mark{display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .mark.new{width:8px;height:7px;border-radius:0;clip-path:polygon(50% 0,100% 100%,0 100%)}
+  .related .rn{display:flex;align-items:center;gap:8px;min-width:0}
+  .panel .close{background:none;border:1px solid var(--panel-line);color:var(--ink-dim);
+    width:28px;height:28px;border-radius:var(--radius-in);cursor:pointer;font-size:16px;line-height:1}
+  .panel .close:hover{color:var(--accent);border-color:var(--accent)}
+  .panel h2{margin:0 0 10px;font-size:30px;line-height:1.12;font-weight:500;letter-spacing:-.02em;text-wrap:balance}
+  .panel .summary{margin:0;font-size:13px;line-height:1.55;color:var(--ink-dim)}
+  .panel .hook{margin:12px 0 0;font-size:12px;line-height:1.5;color:var(--ink);font-family:var(--mono)}
+  .panel .hook[hidden]{display:none}
+  /* the selected theme's headline figures and facts: bento tiles in the 5% fill, a label over its value */
+  .figures{display:flex;flex-direction:column;gap:6px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .kpis div,.stats div{display:flex;flex-direction:column-reverse;justify-content:flex-end;gap:10px;min-width:0;
+    padding:11px 12px 12px;background:var(--off);border-radius:var(--radius)}
+  .kpis b{font-family:var(--sans);font-weight:400;font-size:38px;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .kpis span{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
+  .stats[hidden]{display:none}
+  /* the verbatim passages behind the theme, a document at a time */
+  .ev-meta{margin:-8px 0 14px;font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
+  .ev-topic{margin:0 0 4px;padding:0 12px;background:var(--off);border-radius:var(--radius);transition:background .15s}
+  .ev-topic.hover{background:color-mix(in srgb, var(--accent) 11%, transparent)}
+  .ev-topic.hover .ev-head .t{color:var(--accent)}
+  .ev-head{display:flex;align-items:center;gap:10px;width:100%;padding:10px 0;background:none;border:0;cursor:pointer;
+    color:var(--ink);font-family:var(--mono);font-size:11.5px;text-align:left}
+  .ev-head .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ev-head .n{flex:none;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+  .ev-head .chev{flex:none;color:var(--ink-dim);transition:transform .2s}
+  .ev-head[aria-expanded="true"] .chev{transform:rotate(180deg)}
+  .ev-head:hover .t{color:var(--accent)}
+  .ev-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .ev-quotes{padding:2px 0 12px}
+  .ev-quotes[hidden]{display:none}
+  .ev-q{margin:0 0 12px;padding:0 0 0 10px;border-left:2px solid var(--panel-line)}
+  .ev-q p{margin:0 0 4px;font-size:12.5px;line-height:1.5;color:var(--ink)}
+  .ev-q cite{font-style:normal;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;color:var(--ink-dim)}
+  .ev-note{margin:0;font-size:12px;color:var(--ink-dim)}
+  .ev-unverified{margin:0 0 10px;padding:0 0 0 10px;border-left:2px dashed var(--panel-line);font-size:11.5px;line-height:1.45}
+  /* ---- document view: the documents behind a peak, as cards (a cover, what it is, what it adds) ---- */
+  .doc-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px}
+  .doc-sort{display:flex;gap:2px;padding:2px;background:var(--off);border-radius:var(--radius)}
+  .doc-sort button{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-dim);
+    background:none;border:0;border-radius:var(--radius-in);padding:5px 9px;cursor:pointer}
+  .doc-sort button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+  .doc-chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px}
+  .doc-chip{font-family:var(--mono);font-size:10.5px;color:var(--ink);background:var(--off);border:1px solid transparent;
+    border-radius:999px;padding:4px 9px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .doc-chip .n{color:var(--ink-dim);margin-left:5px;font-variant-numeric:tabular-nums}
+  .doc-chip:hover,.doc-chip.hover{border-color:var(--panel-line);color:var(--accent)}
+  .doc-chip[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+  .doc-chip[aria-pressed="true"] .n{color:inherit;opacity:.7}
+  .doc-list{display:flex;flex-direction:column;gap:6px}
+  .doc-card{display:grid;grid-template-columns:58px minmax(0,1fr);gap:12px;padding:12px;background:var(--off);border-radius:var(--radius)}
+  .doc-card.hover{background:color-mix(in srgb, var(--accent) 9%, transparent)}
+  .doc-cover{width:58px;height:76px;border-radius:3px;overflow:hidden;background:color-mix(in srgb, var(--accent) 8%, transparent);
+    box-shadow:0 0 0 1px var(--panel-line)}
+  .doc-cover img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}
+  .doc-cover.blank{display:flex;flex-direction:column;justify-content:space-between;padding:6px 5px;
+    font-family:var(--mono);font-size:8px;line-height:1.25;letter-spacing:.04em;color:var(--ink-dim);text-transform:uppercase}
+  .doc-cover.blank b{font-family:var(--sans);font-size:15px;font-weight:600;letter-spacing:-.01em;color:var(--ink);text-transform:none}
+  .doc-body{display:flex;flex-direction:column;gap:5px;min-width:0}
+  .doc-title{margin:0;font-size:13.5px;line-height:1.3;font-weight:500;color:var(--ink);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .doc-by{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
+  .doc-by .pub{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  .grade{flex:none;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:1px 6px;
+    border:1px solid color-mix(in srgb, var(--accent) 45%, transparent);color:var(--ink);cursor:help}
+  .grade.keep{background:color-mix(in srgb, var(--accent) 16%, transparent)}
+  .grade.weak{color:var(--ink-dim)}
+  .grade.drop{border-style:dashed;color:var(--ink-dim)}
+  .grade.internal{border-style:dotted}
+  .doc-sum{margin:0;font-size:12px;line-height:1.45;color:var(--ink-dim);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .doc-adds{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin-top:2px}
+  .doc-adds .bar{height:4px;background:color-mix(in srgb, var(--accent) 10%, transparent);border-radius:2px;overflow:hidden}
+  .doc-adds .bar i{display:block;height:100%;background:var(--accent)}
+  .doc-adds span{font-family:var(--mono);font-size:10px;color:var(--ink-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .doc-adds.none span{white-space:normal}
+  .doc-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:2px}
+  .doc-foot button,.doc-foot a{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink);background:none;border:0;padding:0;
+    cursor:pointer;text-decoration:none}
+  .doc-foot button:hover,.doc-foot a:hover{color:var(--accent);text-decoration:underline}
+  .doc-foot .chev{display:inline-block;margin-left:3px;transition:transform .2s}
+  .doc-foot button[aria-expanded="true"] .chev{transform:rotate(180deg)}
+  .doc-quotes{grid-column:1/-1;padding:4px 0 0}
+  .doc-quotes[hidden]{display:none}
+  .doc-quotes .ev-q:last-child{margin-bottom:0}
+  .doc-peaks{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+  .doc-peaks .doc-chip{font-size:10px;padding:3px 8px}
+  .doc-more{width:100%;margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);background:none;
+    border:1px dashed var(--panel-line);border-radius:var(--radius);padding:9px;cursor:pointer}
+  .doc-more:hover{color:var(--accent);border-color:var(--accent)}
+  /* the library: the panel shows every document, nothing else */
+  .panel.library .figures,.panel.library #pRelatedSec,.panel.library #pEvidence,.panel.library #pPlays{display:none}
+  .panel:not(.library) #pLibrary{display:none}
+  /* the reference's patterns, in this page's own style: cover-led tiles, quote cards, a document page */
+  .masonry{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-items:start}
+  .masonry .mcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .view-tabs-sm{display:flex;gap:2px;padding:2px;background:var(--off);border-radius:var(--radius)}
+  .tile{display:flex;flex-direction:column;width:100%;padding:0;border:0;border-radius:var(--radius);overflow:hidden;cursor:pointer;
+    background:var(--off);color:var(--ink);text-align:left;transition:background .15s,transform .15s}
+  .tile:hover{background:color-mix(in srgb, var(--accent) 11%, transparent)}
+  .tile:hover .tile-title{color:var(--accent)}
+  .tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .tile img{display:block;width:100%;aspect-ratio:4/5;object-fit:cover;object-position:top;background:#fff}
+  .tile-art{display:flex;flex-direction:column;justify-content:space-between;aspect-ratio:2/1;padding:10px 11px;
+    background:color-mix(in srgb, var(--accent) 7%, transparent);border-bottom:1px solid var(--panel-line)}
+  .tile-art b{font-size:30px;line-height:1;font-weight:600;letter-spacing:-.03em}
+  .tile-art span,.doc-hero .art span{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
+  .tile-body{display:flex;flex-direction:column;gap:6px;padding:10px 11px 11px}
+  .tile-title{margin:0;font-size:13px;line-height:1.3;font-weight:500;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+  .tile-by{font-family:var(--mono);font-size:9.5px;line-height:1.4;color:var(--ink-dim)}
+  .tile-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-family:var(--mono);font-size:9.5px;color:var(--ink-dim)}
+  .qcard{display:flex;flex-direction:column;gap:9px;padding:12px;background:var(--off);border-radius:var(--radius)}
+  .qcard .qm{height:12px;font-size:26px;line-height:1;color:var(--ink-dim);font-family:Georgia,serif}
+  .qcard p{margin:0;font-size:12.5px;line-height:1.5;color:var(--ink)}
+  .qcard .qmeta{font-family:var(--mono);font-size:9.5px;color:var(--ink-dim)}
+  .qtag{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 9px 3px 3px;border:0;border-radius:999px;
+    background:color-mix(in srgb, var(--accent) 9%, transparent);color:var(--ink);font-family:var(--mono);font-size:9.5px;cursor:pointer;text-align:left}
+  .qtag.plain{padding-left:9px}
+  .qtag:hover{background:var(--accent);color:var(--on-accent)}
+  .qtag img,.qtag i{flex:none;width:14px;height:18px;border-radius:2px;object-fit:cover;object-position:top;background:#fff}
+  .qtag i{display:grid;place-items:center;background:color-mix(in srgb, var(--accent) 20%, transparent);font-style:normal;font-size:7px}
+  .qtag span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .doc-title button{all:unset;cursor:pointer}
+  .doc-title button:hover{color:var(--accent);text-decoration:underline}
+  .doc-title button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .doc-cover.open{cursor:pointer}
+  /* the document page: a cover header, what it is, the industries it shapes, its excerpts */
+  .panel.document > :not(#pDocument){display:none}
+  .panel:not(.document) #pDocument{display:none}
+  #pDocument{display:flex;flex-direction:column;gap:30px}
+  #pDocument > *{margin:0}
+  .doc-hero{position:relative;margin:-22px -22px 0 !important;min-height:340px;padding:22px;display:flex;flex-direction:column;justify-content:flex-end;gap:8px;overflow:hidden}
+  .doc-hero > img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top}
+  .doc-hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(to bottom, transparent 0%, color-mix(in srgb, var(--ground) 35%, transparent) 30%, color-mix(in srgb, var(--ground) 90%, transparent) 62%, var(--ground) 100%)}
+  .doc-hero > *:not(img){position:relative;z-index:1}
+  .doc-hero.blank{min-height:220px;background:color-mix(in srgb, var(--accent) 6%, transparent)}
+  .doc-hero .art{position:absolute;top:68px;left:22px;display:flex;flex-direction:column;gap:6px}
+  .doc-hero .art b{font-size:84px;line-height:.9;font-weight:600;letter-spacing:-.04em;opacity:.16}
+  .doc-hero h2{margin:4px 0 0;font-size:26px;line-height:1.15;font-weight:500;letter-spacing:-.02em;text-wrap:balance}
+  .doc-nav{position:absolute !important;top:18px;left:18px;right:18px;display:flex;justify-content:space-between;z-index:2 !important}
+  .doc-nav button{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;line-height:1;color:var(--ink);
+    background:color-mix(in srgb, var(--ground) 70%, transparent);border:1px solid var(--panel-line);backdrop-filter:blur(8px)}
+  .doc-nav button:hover{color:var(--accent);border-color:var(--accent)}
+  .doc-nav .spacer{width:32px}
+  .doc-hero .doc-by{font-size:10.5px}
+  .doc-hero .chip{align-self:flex-start}
+  .doc-lede{display:flex;flex-direction:column;gap:14px}
+  .doc-lede .summary{font-size:13.5px;color:var(--ink)}
+  .doc-peaks.big{gap:5px}
+  .doc-peaks.big .doc-chip{font-size:10.5px;padding:5px 10px}
+  .stats div.wide{grid-column:1/-1}
+  .stats div.wide dd{font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0}
+  .stats div{flex-direction:column;justify-content:flex-start;gap:6px}
+  .stats dt{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
+  .stats dd{margin:0;font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  /* a section header, with an (i) on the right that explains the section */
+  .sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px}
+  .info{position:relative;flex:none;display:grid;place-items:center;width:24px;height:24px;margin-right:-4px;padding:0;
+    background:none;border:0;border-radius:50%;color:var(--ink-dim);cursor:help;transition:color .15s}
+  .info svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .info:hover,.info:focus-visible{color:var(--accent)}
+  .info:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .info .tip{position:absolute;right:0;top:calc(100% + 6px);z-index:3;width:250px;padding:10px 12px;
+    background:var(--accent);color:var(--on-accent);border-radius:var(--radius);
+    font-family:var(--sans);font-size:12.5px;line-height:1.45;font-weight:400;text-align:left;cursor:default;
+    opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .15s,transform .15s,visibility .15s}
+  .info:hover .tip,.info:focus-visible .tip{opacity:1;visibility:visible;transform:none}
+  .panel .lbl{margin:0 0 14px;font-family:var(--sans);font-size:20px;line-height:1.2;font-weight:500;letter-spacing:-.015em;color:var(--ink)}
+  .sec-head .lbl{margin:0}
+  .lbl .count{margin-left:8px;font-weight:400;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+  .related{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+  .related button{width:100%;display:grid;grid-template-columns:1fr 56px 32px;align-items:center;gap:12px;
+    background:var(--off);border:0;border-radius:var(--radius);padding:10px 12px;cursor:pointer;
+    color:var(--ink);font-family:var(--mono);font-size:11.5px;line-height:1.35;text-align:left;transition:background .15s}
+  .related button:hover,.related li.hover button{background:color-mix(in srgb, var(--accent) 11%, transparent);color:var(--accent)}
+  .related .bar{height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
+  .related .bar i{display:block;height:100%;background:var(--accent)}
+  .related .rv{font-size:10.5px;color:var(--ink-dim);text-align:right;font-variant-numeric:tabular-nums}
+  .label.related .txt{font-weight:600}
+  .label.related .dot{background:var(--accent)}
+  .label{transition:opacity .25s}
+  .labels.dim .label:not(.active):not(.related):not(.hover){opacity:.26}
+  /* the chrome slides left to make room for the panel */
+  .topbar,.camera{transition:padding-right .35s cubic-bezier(.2,.7,.2,1),right .35s cubic-bezier(.2,.7,.2,1)}
+  #app.panel-open .topbar{padding-right:calc(var(--panel-w,560px) + 22px)}
+  #app.panel-open .camera{right:calc(var(--panel-w,560px) + 22px)}
+  #app.resizing .topbar,#app.resizing .camera{transition:none}
+  @media (max-width:640px){
+    #app.panel-open .topbar{padding-right:22px}
+    #app.panel-open .camera{right:22px}
+  }
+
+  #app:has(.msg:not([hidden])) .loader{display:none}   /* an error replaces the loader */
+  .msg{position:absolute;inset:0;display:grid;place-items:center;z-index:9;
+    font-family:var(--mono);font-size:13px;color:var(--ink-dim);padding:24px;text-align:center}
+  .msg[hidden]{display:none!important}   /* class rule must not defeat the hidden attribute */
+
+
+  /* ---- 2-D bubbles view ---- */
+  .bubbles{position:absolute;top:0;bottom:0;left:0;width:100%;height:100%;z-index:3;pointer-events:none;display:none}
+  #app.tab-2d .bubbles,#app.tab-split .bubbles,#app.view-fade .bubbles{display:block}
+  #app.tab-2d #btnView{display:none}           /* tilt makes no sense in the 2-D view */
+  .bubbles .outer{fill:none;stroke-width:1;opacity:.55}
+  .bubbles .inner{pointer-events:auto;cursor:pointer;stroke-width:1.2;transition:opacity .25s}
+  .bubbles.dim .b:not(.active):not(.related):not(.hover) .inner{opacity:.28}
+  .bubbles .b.hover .inner{stroke:var(--label-ink);stroke-opacity:1;stroke-width:1.5}
+  .bubbles .b.related .inner{stroke:var(--label-ink);stroke-opacity:.75;stroke-width:1.5}   /* related to the selection: a white edge, no colour */
+  .range-labels{position:absolute;inset:0;z-index:3;overflow:hidden;pointer-events:none}   /* under the market names */
+  .range-labels.hidden{display:none !important}
+  /* a range's name reads exactly like a theme label, just without the marker */
+  /* an industry's name over its cluster of markets: a caption, not a peak label, so no marker and no rollover */
+  .range-label{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;pointer-events:none}
+  .range-label{opacity:.55;transition:opacity .15s}
+  .range-label .txt{display:block;font-size:9px;line-height:1;letter-spacing:.12em;text-transform:uppercase;padding:3px 7px;
+    text-shadow:none;background:color-mix(in srgb, var(--ground) 70%, transparent);
+    border:1px solid color-mix(in srgb, var(--label-ink) 35%, transparent)}
+  .range-label.active{opacity:.9}
+  .step-tabs .tab.soon{opacity:.5;cursor:default}
+  .msg-reload{margin-left:8px;font:inherit;color:inherit;background:none;border:1px solid currentColor;border-radius:999px;padding:2px 10px;cursor:pointer}
+  /* ---- the peak list and its skip link: hidden until focused from the keyboard, then a pill at the foot of the map ---- */
+  .sr-only,.peak-list button:not(:focus-visible),.skip-peaks:not(:focus-visible){position:absolute;width:1px;height:1px;
+    margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .peak-list{position:absolute;top:0;left:0;z-index:8}
+  .peak-list ul{list-style:none;margin:0;padding:0}
+  .peak-list button:focus-visible,.skip-peaks:focus-visible{position:fixed;z-index:8;left:50%;bottom:20px;transform:translateX(-50%);
+    max-width:calc(100vw - 44px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11.5px;
+    letter-spacing:.02em;text-decoration:none;color:var(--on-accent);background:var(--label-ink);border:0;border-radius:999px;
+    padding:6px 14px;cursor:pointer;outline:2px solid var(--accent);outline-offset:2px}
+  #app.panel-open .peak-list button:focus-visible,#app.panel-open .skip-peaks:focus-visible{left:calc((100vw - var(--panel-w,560px)) / 2)}   /* centred in what the panel leaves */
+  @media (max-width:640px){ #app.panel-open .peak-list button:focus-visible,#app.panel-open .skip-peaks:focus-visible{left:50%} }
+</style>
+<link rel="stylesheet" href="explainer.css">   <!-- the explainer's own styles (explainer.js), after the page's so the cascade is unchanged -->
+
+<div id="app" class="tab-3d booting intro">
+  <canvas id="gl" role="img" aria-label="Wellness landscape map"></canvas>   <!-- map.js keeps the label to what's shown -->
+  <!-- the peaks' labels are for the mouse; keyboards and screen readers use the peak list (#peakList) -->
+  <div id="labels" class="labels" aria-hidden="true"></div>
+  <div id="rangeLabels" class="range-labels hidden" aria-hidden="true"></div>
+  <div id="labelsB" class="labels flat" aria-hidden="true"></div>
+  <div id="divider" class="divider"></div>
+
+  <div class="overlay topbar">
+    <div class="topbar-left">
+      <div class="tabs view-tabs" role="tablist" aria-label="View">
+        <button class="tab" role="tab" data-view="3d" aria-selected="true"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>Terrain</button>
+        <button class="tab" role="tab" data-view="2d" aria-selected="false"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.5" cy="14.5" r="5.5"/><circle cx="17" cy="7" r="3.5"/><circle cx="18.5" cy="17.5" r="2.5"/></svg>Bubbles</button>
+        <button class="tab" role="tab" data-view="split" aria-selected="false"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>Split</button>
+      </div>
+      <div class="tabs step-tabs" role="tablist" aria-label="Step">
+        <button class="tab" role="tab" data-step="landscape" aria-selected="true" title="The base map defines the industries; the documents fill them. Italic industries are emergent: outside the base map."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg>Landscape</button>
+        <button class="tab" role="tab" data-step="brand" aria-selected="false" title="Where a brand sits: its presence on each industry. Industries the brand is absent from recede."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1"/></svg>Brand</button>
+        <button class="tab" role="tab" data-step="uniqueness" aria-selected="false" title="Where each brand fits: its traits against why people buy, per industry and market. Grey = not scored yet."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .13-5.35 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>Uniqueness</button>
+      </div>
+      <div class="tabs subset-tabs" role="tablist" aria-label="Brand" hidden></div>
+      <div class="tabs rule-tabs" role="tablist" aria-label="Fit rule" hidden></div>
+    </div>
+    <div class="topright">
+      <div class="controls">
+        <button class="ctl" id="btnLibrary" type="button" aria-pressed="false" title="Every document the landscape is built on, as cards">Documents</button>
+        <div class="tabs level-tabs" data-pane="both" role="tablist" aria-label="Level">
+          <button class="tab" role="tab" data-level="themes" aria-selected="true" title="One peak per industry"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>Industries</button>
+          <button class="tab" role="tab" data-level="subthemes" aria-selected="false" title="Break every industry into its markets: each peak is a market, clustered under its industry"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>Markets</button>
+        </div>
+      </div>
+      <ul class="map-key" aria-label="Key">
+        <li class="k-terrain"><span class="mark" aria-hidden="true"></span>Established</li>
+        <li class="k-terrain emergent"><span class="mark new" aria-hidden="true"></span>Emergent</li>
+        <li class="k-bubbles"><span class="swatch" aria-hidden="true"></span>Established</li>
+        <li class="k-bubbles emergent"><span class="swatch dense" aria-hidden="true"></span>Emergent</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tabs level-tabs pane-level" data-pane="A" role="tablist" aria-label="Terrain level">
+    <button class="tab" role="tab" data-level="themes" aria-selected="true"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>Industries</button>
+    <button class="tab" role="tab" data-level="subthemes" aria-selected="false"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>Markets</button>
+  </div>
+  <div class="tabs level-tabs pane-level" data-pane="B" role="tablist" aria-label="Bubbles level">
+    <button class="tab" role="tab" data-level="themes" aria-selected="true"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>Industries</button>
+    <button class="tab" role="tab" data-level="subthemes" aria-selected="false"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>Markets</button>
+  </div>
+
+  <!-- every peak on the map as a button, labels hidden for overlap included (map.js fills it); the link jumps past it -->
+  <a class="skip-peaks" id="skipPeaks" href="#btnSpin">Skip the peak list</a>
+  <section class="peak-list" id="peakList" aria-label="Peaks on the map"></section>
+
+  <svg id="bubbles" class="bubbles" aria-hidden="true"></svg>
+
+  <!-- camera: map-style controls in the bottom right -->
+  <div class="overlay camera" role="group" aria-label="Camera">
+    <button class="cam-btn" id="btnSpin" type="button" aria-pressed="false" aria-label="Auto-orbit" title="Auto-orbit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+    </button>
+    <button class="cam-btn" id="btnTheme" type="button" aria-pressed="false" aria-label="Light theme" title="Light / dark"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <button class="cam-btn" id="btnView" type="button" aria-pressed="true" aria-label="Tilt (3D)" title="Tilt: 3D / top-down">3D</button>
+    <button class="cam-btn" id="btnNorth" type="button" aria-label="Reset rotation" title="Reset rotation">
+      <svg viewBox="0 0 24 24" aria-hidden="true" id="compass"><path class="n" d="M12 3l3.5 9h-7z"/><path d="M12 21l-3.5-9h7z"/></svg>
+    </button>
+    <button class="cam-btn" id="btnReset" type="button" aria-label="Reset view" title="Reset view">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+    </button>
+    <div class="cam-zoom">
+      <button class="cam-btn" id="btnZoomIn" type="button" aria-label="Zoom in" title="Zoom in">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button class="cam-btn" id="btnZoomOut" type="button" aria-label="Zoom out" title="Zoom out">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="overlay dock" hidden>   <!-- hidden for now; remove `hidden` to bring the controls back -->
+    <div class="dock-body" id="dockBody" hidden>
+    <div class="tabs dock-tabs" role="tablist" aria-label="Controls">
+      <button class="tab" role="tab" id="dockTabTheme" data-dock="theme" aria-selected="true" aria-controls="dockTheme">Industry</button>
+      <button class="tab" role="tab" id="dockTabTerrain" data-dock="terrain" aria-selected="false" aria-controls="dockTerrain">Terrain</button>
+      <button class="tab" role="tab" id="dockTabKey" data-dock="key" aria-selected="false" aria-controls="dockKey">Key</button>
+    </div>
+    <div class="dock-pane eroder" id="dockTerrain" role="tabpanel" aria-labelledby="dockTabTerrain" hidden>
+    <div class="row"><label for="shrink">Shrink <span class="n" id="shrinkVal">0%</span></label>
+      <input id="shrink" type="range" min="0" max="100" value="0" step="1"></div>
+    <div class="row"><label for="heightS">Height <span class="n" id="heightVal">1.0×</span></label>
+      <input id="heightS" type="range" min="20" max="200" value="100" step="1"></div>
+    <div class="row"><label for="spreadS">Spread <span class="n" id="spreadVal">1.2×</span></label>
+      <input id="spreadS" type="range" min="50" max="200" value="120" step="1"></div>
+    <div class="row"><label for="noiseS">Noise <span class="n" id="noiseVal">0</span></label>
+      <input id="noiseS" type="range" min="0" max="100" value="0" step="1"></div>
+    <div class="minimap">
+      <div class="lbl">Heightmap · drives the terrain</div>
+      <canvas id="mini" width="224" height="224"></canvas>
+    </div>
+    </div>
+
+    <div class="dock-pane legend" id="dockTheme" role="tabpanel" aria-labelledby="dockTabTheme">
+    <div class="lbl" id="rampLbl">Elevation · frequency <span class="n" id="rampVal">magma</span></div>
+    <div class="ramp" id="rampBar" role="button" tabindex="0" title="Click to cycle the colour scale"></div>
+    <div class="ramp-ends"><span>floor</span><span>peak</span></div>
+    <div class="ramps" role="group" aria-label="Colour scale">
+      <button class="rchip" type="button" data-ramp="magma"   title="magma"   aria-label="magma"   aria-pressed="true"><i></i></button>
+      <button class="rchip" type="button" data-ramp="inferno" title="inferno" aria-label="inferno" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="plasma"  title="plasma"  aria-label="plasma"  aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="viridis" title="viridis" aria-label="viridis" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="goandco" title="goandco" aria-label="goandco" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="cividis" title="cividis" aria-label="cividis" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="turbo"   title="turbo"   aria-label="turbo"   aria-pressed="false"><i></i></button>
+    </div>
+    <div class="ramps" role="group" aria-label="Light themes" style="margin-top:6px">
+      <button class="rchip" type="button" data-ramp="ember" title="ember · light · beige → orange → red → purple" aria-label="ember (light)" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="lemon" title="lemon · light · grey → beige → yellow" aria-label="lemon (light)" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="dusk" title="dusk · light · grey → sand → rose → violet → blue" aria-label="dusk (light)" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="lagoon" title="lagoon · light · pale yellow → lime → green → teal → navy" aria-label="lagoon (light)" aria-pressed="false"><i></i></button>
+      <button class="rchip" type="button" data-ramp="orchid" title="orchid · light · cream → pink → magenta → violet" aria-label="orchid (light)" aria-pressed="false"><i></i></button>
+    </div>
+    <button class="ramp-default" id="rampDefault" type="button" title="Open the map with this colour scale next time (this browser only)">Make default</button>
+    </div>
+
+    <div class="dock-pane legend" id="dockKey" role="tabpanel" aria-labelledby="dockTabKey" hidden>
+    <div class="lbl" id="legendTitle">Sector</div>
+    <ul class="industry-legend" id="industryLegend"></ul>
+    <div class="brand-dna" id="brandDna" hidden></div>
+    </div>
+    </div>
+    <button class="dock-head" id="btnLab" type="button" aria-expanded="false" aria-controls="dockBody">Controls <span class="chev" aria-hidden="true">▴</span></button>
+  </div>
+
+  <div class="panel-resize" id="panelResize" role="separator" aria-orientation="vertical" aria-label="Resize the panel (drag, or use the arrow keys)" tabindex="0"></div>
+  <aside class="panel" id="panel" aria-hidden="true">
+    <header class="p-intro">
+      <div class="panel-head">
+        <span class="chip" id="pType"></span>
+        <button class="close" id="pClose" aria-label="Close panel">×</button>
+      </div>
+      <h2 id="pName"></h2>
+      <p class="summary" id="pSummary"></p>
+      <p class="hook" id="pHook" hidden></p>
+    </header>
+    <ul class="plays" id="pPlays" hidden></ul>
+    <div class="figures">
+      <div class="kpis" id="pKpis"></div>
+      <dl class="stats" id="pStats"></dl>
+    </div>
+    <section class="evidence" id="pEvidence" hidden>
+      <div class="sec-head">
+        <h3 class="lbl">Documents<span class="count" id="pEvidenceCount"></span></h3>
+        <button type="button" class="info" aria-label="About this section" aria-describedby="pEvidenceTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span class="tip" role="tooltip" id="pEvidenceTip">The documents behind this peak. The bar is the share of the peak's height each one adds: a strong source counts in full, a weak one at half, and one document can add at most 3. Open a card for its verbatim excerpts.</span></button>
+      </div>
+      <p class="ev-meta" id="pEvidenceMeta"></p>
+      <div id="pEvidenceBody"></div>
+    </section>
+    <section id="pDocument" aria-live="polite"></section>
+    <section id="pLibrary">
+      <p class="ev-meta" id="pLibraryMeta"></p>
+      <div id="pLibraryBody"></div>
+    </section>
+    <section id="pRelatedSec">
+      <div class="sec-head">
+        <h3 class="lbl"><span id="pRelatedLbl">Related industries</span><span class="count" id="pRelatedCount"></span></h3>
+        <button type="button" class="info" aria-label="About this section" aria-describedby="pRelatedTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span class="tip" role="tooltip" id="pRelatedTip"></span></button>
+      </div>
+      <ul class="related" id="pRelated"></ul>
+    </section>
+  </aside>
+
+  <div class="loader" id="loader" role="status" aria-live="polite">
+    <div class="loader-text" id="loaderText">Loading industries</div>
+    <div class="loader-bar"><i id="loaderFill"></i></div>
+  </div>
+
+  <div class="msg" id="msg" role="alert" hidden></div>
+</div>
+
+<script src="map.js"></script>   <!-- the map itself: a file, so the page runs under script-src 'self' with no inline code -->
+<script src="explainer.js" defer></script>   <!-- the explainer: "How it works" button and pop-up (explainer.js, explainer.json, explainer-scenes.html) -->

@@ -1,0 +1,16 @@
+{
+  "name": "pathways",
+  "owner": {
+    "name": "Parallel"
+  },
+  "metadata": {
+    "description": "Pathways for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "pathways",
+      "source": "./plugins/pathways",
+      "description": "Open the Pathways tool on this Mac with /pathways."
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "version": "landscape-rules-0.3",
+  "changedAt": "2026-11-03",
+  "notes": "The numbers behind the landscape. Change them here, rebuild, and compare. What each one means: rules.md.",
+  "mention": {
+    "minSalience": 0.4,
+    "salienceGuide": {
+      "dedicatedSection": 0.9,
+      "clearParagraph": 0.6,
+      "passing": 0.3
+    },
+    "excerptMustVerify": true,
+    "maxPerMarketPerDocument": 5,
+    "maxPerIndustryPerDocument": 5
+  },
+  "height": {
+    "gradeWeight": {
+      "keep": 1.0,
+      "weak": 0.5,
+      "drop": 0.0
+    },
+    "perDocumentCap": 3.0,
+    "curve": "smooth"
+  },
+  "newMarket": {
+    "minDocuments": 2,
+    "orStrongMentionsInOneDocument": 2,
+    "strongSalience": 0.7,
+    "demandSurveysCanMint": false
+  },
+  "newIndustry": {
+    "minDocuments": 3,
+    "minMentions": 6,
+    "minMentionsPerDocument": 2
+  },
+  "context": {
+    "maxEnablersPerPart": 8,
+    "maxContextPerPart": 8,
+    "addsHeight": false
+  },
+  "grading": {
+    "keep": "substantive, credible primary source",
+    "weak": "thin, mainly restates others, niche sample, or older than 2021",
+    "drop": "nothing on wellness markets",
+    "demandSurveysKeepSourceGrade": true
+  },
+  "parts": {
+    "wordsPerPart": 12000
+  },
+  "internalSources": {
+    "note": "Licensed or internal-use sources: they add height, but no excerpt, cover or link is ever shown. The plugin is public, so the sources' names come from Cloudflare (the settings record internal-sources, saved by Fetch latest as landscape/internal-sources.json) and are added to these.",
+    "publishers": [],
+    "idPrefixes": [
+      "licensed-"
+    ]
+  }
+}
