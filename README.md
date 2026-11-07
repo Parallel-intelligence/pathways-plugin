@@ -13,20 +13,17 @@ Pathways runs on your Mac, inside the Claude desktop app. Setting it up takes ab
 ## Install (once)
 
 1. Open the Claude app and click **Code**. When it asks for a folder, choose any one, for example Documents.
-2. Type this and press Enter:
+2. Copy this message into the chat and press Enter:
 
    ```
-   /plugin marketplace add Parallel-intelligence/pathways-plugin
+   Please install the Pathways plugin by running: "$CLAUDE_CODE_EXECPATH" plugin install pathways --marketplace Parallel-intelligence/pathways-plugin
+   If it fails because git or Apple's developer tools are missing, run xcode-select --install, tell me to click Install in the window that opens, and run the install again when I say it's done. If it fails for any other reason, stop and show me the error. Don't install it another way.
    ```
 
-   If your Mac asks to install "command line developer tools", click **Install** and wait for it to finish (it can take 10 minutes). Then type the line again.
-3. Type this and press Enter:
+3. When Claude asks to run the command, check that it names `Parallel-intelligence/pathways-plugin`, then choose **Allow** (once, not "always"). If a window asks to install "command line developer tools", click **Install**, wait for it to finish (it can take 10 minutes), then tell Claude it's done.
+4. When Claude says the plugin is installed, start a new Code chat.
 
-   ```
-   /plugin install pathways@pathways
-   ```
-
-4. Start a new Code chat.
+The Claude app has no button for adding a plugin from outside its own list, so Claude runs the installer for you. You don't need a GitHub account.
 
 ## Start Pathways (each time)
 
@@ -50,12 +47,14 @@ Pathways runs on your Mac, inside the Claude desktop app. Setting it up takes ab
 
 ## Updating
 
-When your Pathways contact says there's a new version, type these one at a time in a Code chat, then start a new chat:
+When your Pathways contact says there's a new version, copy this message into a Code chat and press Enter. Choose **Allow** (once, not "always") when Claude asks, then start a new chat.
 
 ```
-/plugin marketplace update pathways
-/plugin update pathways@pathways
+Please update the Pathways plugin by running: "$CLAUDE_CODE_EXECPATH" plugin marketplace update pathways && "$CLAUDE_CODE_EXECPATH" plugin update pathways@pathways
+If it fails, stop and show me the error.
 ```
+
+The next time you type `/pathways`, it switches to the new version by itself.
 
 ## About this repo
 
