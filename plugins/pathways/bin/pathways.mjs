@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { accessSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -1653,7 +1653,7 @@ var needsToken = (req) => {
 	const route = (req.url ?? "/").split("?")[0];
 	return route.startsWith("/api/") || route.startsWith("/workspace/") || req.method !== "GET" && req.method !== "HEAD";
 };
-function startServer({ port, appDir, mapDir, landscapeDir, token }) {
+function startServer({ port, appDir, mapDir, landscapeDir, token, version }) {
 	if (!/^[0-9a-f]{64}$/.test(token)) throw new Error("The launch token is missing; start the tool with `pathways start`.");
 	const expected = Buffer.from(token);
 	const tokenOk = (req) => {
@@ -1673,6 +1673,16 @@ function startServer({ port, appDir, mapDir, landscapeDir, token }) {
 		if (!ownHost.test(req.headers.host ?? "")) return refuse(res, 403, "Forbidden");
 		if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) return refuse(res, 403, "Forbidden");
 		if (needsToken(req) && !tokenOk(req)) return refuse(res, 403, "Forbidden: reopen the tool from /pathways");
+		if (req.method === "GET" && req.url === "/api/ping") {
+			res.writeHead(200, {
+				...SECURITY_HEADERS,
+				"Content-Type": "application/json; charset=utf-8"
+			});
+			return res.end(JSON.stringify({
+				tool: "pathways",
+				version
+			}));
+		}
 		const next = (index) => () => routes[index](req, res, next(index + 1));
 		try {
 			next(0)();
@@ -1692,7 +1702,6 @@ var ROOT = path.resolve(import.meta.dirname, "..");
 var PORT = Number(process.env.PATHWAYS_PORT) || 5180;
 var URL$1 = `http://127.0.0.1:${PORT}`;
 var STATE = path.join(os.tmpdir(), "pathways");
-var PID_FILE = path.join(STATE, "server.pid");
 var LOG_FILE = path.join(STATE, "server.log");
 var TOKEN_FILE = path.join(STATE, "token");
 var readToken = () => existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, "utf8").trim() : "";
@@ -1704,13 +1713,96 @@ var version = () => {
 		return "unknown";
 	}
 };
-/** Whether the tool answers on its port: "ours", "other" (something else has the port) or "free". */
-async function port() {
+var SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+/** Whether version a is older than b; anything that isn't x.y.z counts as older. */
+var olderThan = (a, b) => {
+	const [x, y] = [SEMVER.exec(a), SEMVER.exec(b)];
+	if (!x || !y) return true;
+	for (let i = 1; i <= 3; i++) if (Number(x[i]) !== Number(y[i])) return Number(x[i]) < Number(y[i]);
+	return false;
+};
+/**
+* The tool's own server processes listening on its address: lsof shows a person only their own processes, and
+* ps confirms each is `pathways.mjs serve` (every version runs as that). macOS's own lsof and ps, never another
+* program first on PATH, since what they say decides which process is stopped.
+*/
+function ownServers() {
+	let pids = [];
 	try {
-		return (await (await fetch(URL$1, { signal: AbortSignal.timeout(1500) })).text()).includes("<title>Pathways CMS</title>") ? "ours" : "other";
+		pids = execFileSync("/usr/sbin/lsof", [
+			"-nP",
+			`-iTCP@127.0.0.1:${PORT}`,
+			"-sTCP:LISTEN",
+			"-t"
+		], {
+			encoding: "utf8",
+			stdio: "pipe"
+		}).split("\n").map(Number).filter((pid) => pid > 0);
+	} catch {}
+	return pids.filter((pid) => {
+		try {
+			return execFileSync("/bin/ps", [
+				"-o",
+				"command=",
+				"-p",
+				String(pid)
+			], {
+				encoding: "utf8",
+				stdio: "pipe"
+			}).includes("pathways.mjs serve");
+		} catch {
+			return false;
+		}
+	});
+}
+var ask = (route) => fetch(`${URL$1}${route}`, {
+	headers: { "x-pathways-token": readToken() },
+	signal: AbortSignal.timeout(1500)
+});
+async function port() {
+	let response;
+	try {
+		response = await ask("/api/ping");
 	} catch (error) {
-		return error.cause?.code === "ECONNREFUSED" ? "free" : "other";
+		return { state: error.cause?.code === "ECONNREFUSED" ? "free" : "other" };
 	}
+	const body = await response.text().catch(() => "");
+	if (response.status === 403 && body.includes("reopen the tool from /pathways")) return ownServers().length ? {
+		state: "older",
+		lost: true
+	} : { state: "locked" };
+	if (response.ok) {
+		try {
+			const { tool, version: running } = JSON.parse(body);
+			if (tool === "pathways" && typeof running === "string" && SEMVER.test(running)) return {
+				state: olderThan(running, version()) ? "older" : "ours",
+				version: running
+			};
+		} catch {}
+		return { state: "other" };
+	}
+	if (response.status === 404) try {
+		if ((await (await fetch(URL$1, { signal: AbortSignal.timeout(1500) })).text()).includes("<title>Pathways CMS</title>")) return { state: "older" };
+	} catch {}
+	return { state: "other" };
+}
+/**
+* What this person's running tool is in the middle of, if anything: stopping it now would cut that off. A tool
+* that doesn't answer clearly counts as busy.
+*/
+async function busyWith() {
+	for (const [route, what] of [
+		["/api/analyse", "Analyse"],
+		["/api/fetch", "Fetch latest"],
+		["/api/publish", "publishing"]
+	]) try {
+		const response = await ask(route);
+		if (response.status === 404) continue;
+		if ((await response.json()).running) return what;
+	} catch {
+		return "something it didn't say";
+	}
+	return null;
 }
 async function checkUp() {
 	const checks = [];
@@ -1818,13 +1910,20 @@ async function checkUp() {
 	if (missing.length === 0) pass(`Pathways ${version()}`);
 	else fail(`This copy of the tool is incomplete (no ${missing.join(", ")})`, "Reinstall the pathways plugin.");
 	const onPort = await port();
-	if (onPort === "ours") pass(`Already running at ${URL$1}`);
-	else if (onPort === "other") fail(`Port ${PORT} is taken by something else`, `Stop whatever is using port ${PORT}, then run /pathways again.`);
-	else pass(`Port ${PORT} is free`);
+	if (onPort.state === "ours") pass(`Already running at ${URL$1}`);
+	else if (onPort.state === "free") pass(`Port ${PORT} is free`);
+	else if (onPort.lost) pass("Pathways is already running, but macOS cleared its launch token: starting restarts it");
+	else if (onPort.state === "older") {
+		const running = onPort.version ? `Pathways ${onPort.version}` : "An earlier copy of Pathways";
+		const busy = await busyWith();
+		if (busy) fail(`${running} is still running, in the middle of ${busy}`, `Let it finish in the tool, then type /pathways again to switch to Pathways ${version()}.`);
+		else pass(`${running} is still running: starting replaces it with Pathways ${version()}`);
+	} else if (onPort.state === "locked") fail(`Port ${PORT} has a copy of Pathways that was started from another Mac account on this computer`, "Stop it from that account (type stop Pathways in Claude there), or restart this Mac, then type /pathways again.");
+	else fail(`Port ${PORT} is taken by something else`, `Stop whatever is using port ${PORT}, then run /pathways again.`);
 	return {
 		checks,
 		ready: checks.every((check) => check.ok),
-		running: onPort === "ours"
+		onPort: onPort.state
 	};
 }
 function print(checks) {
@@ -1832,21 +1931,31 @@ function print(checks) {
 	for (const check of checks) console.log(`${check.ok ? "✓" : "✗"} ${check.label}${check.fix ? `\n    Fix: ${check.fix}` : ""}`);
 	console.log("");
 }
-var readPid = () => {
-	try {
-		return Number(readFileSync(PID_FILE, "utf8")) || null;
-	} catch {
-		return null;
+/** Stops this person's running tool and waits for the port to be let go. Returns what's on the port then. */
+async function stopRunning() {
+	let state = (await port()).state;
+	if (state === "ours" || state === "older") for (const pid of ownServers()) try {
+		process.kill(pid, "SIGTERM");
+	} catch {}
+	const deadline = Date.now() + 5e3;
+	while ((state === "ours" || state === "older") && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		state = (await port()).state;
 	}
-};
+	return state;
+}
 async function start() {
-	const { checks, ready, running } = await checkUp();
+	const { checks, ready, onPort } = await checkUp();
 	print(checks);
 	if (!ready) {
 		console.log("Not started: fix the ✗ lines first.");
 		return 1;
 	}
-	if (!running) {
+	if (onPort === "older" && await stopRunning() !== "free") {
+		console.log(`Not started: the older Pathways on port ${PORT} didn't stop. Restart this Mac, then type /pathways again.`);
+		return 1;
+	}
+	if (onPort !== "ours") {
 		mkdirSync(workingFolderPath(), {
 			recursive: true,
 			mode: 448
@@ -1858,7 +1967,7 @@ async function start() {
 		});
 		writeFileSync(TOKEN_FILE, randomBytes(32).toString("hex"), { mode: 384 });
 		const log = openSync(LOG_FILE, "a", 384);
-		const child = spawn(process.execPath, [import.meta.filename, "serve"], {
+		spawn(process.execPath, [import.meta.filename, "serve"], {
 			detached: true,
 			stdio: [
 				"ignore",
@@ -1866,11 +1975,9 @@ async function start() {
 				log
 			],
 			env: process.env
-		});
-		child.unref();
-		writeFileSync(PID_FILE, String(child.pid), { mode: 384 });
+		}).unref();
 		const deadline = Date.now() + 1e4;
-		while (await port() !== "ours") {
+		while ((await port()).state !== "ours") {
 			if (Date.now() > deadline) {
 				console.log(`It didn't start. The log is at ${LOG_FILE}.`);
 				return 1;
@@ -1882,25 +1989,28 @@ async function start() {
 	return 0;
 }
 async function stop() {
-	const pid = readPid();
-	if (pid) {
-		try {
-			process.kill(pid, "SIGTERM");
-		} catch {}
-		rmSync(PID_FILE, { force: true });
-	}
-	const deadline = Date.now() + 5e3;
-	while (await port() === "ours" && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
-	if (await port() === "ours") {
-		console.log(`Still running at ${URL$1}, but not from this copy of the tool. Close it where it was started.`);
+	const before = (await port()).state;
+	const state = await stopRunning();
+	if (state === "ours" || state === "older") {
+		console.log(`It didn't stop within 5 seconds. Try again, or restart this Mac.`);
 		return 1;
 	}
-	console.log("Stopped.");
+	const mine = before === "ours" || before === "older";
+	if (state === "locked") console.log(`${mine ? "Stopped. " : "Nothing of yours was running. "}Port ${PORT} has a copy of Pathways from another Mac account on this computer: stop it from that account.`);
+	else if (state === "other") console.log(`${mine ? "Stopped." : "Nothing of yours was running."} Port ${PORT} is taken by something else.`);
+	else console.log(mine ? "Stopped." : "It wasn't running.");
 	return 0;
 }
 async function status() {
 	const onPort = await port();
-	console.log(onPort === "ours" ? `Running at ${openAt()}` : onPort === "other" ? `Not running: port ${PORT} is taken by something else` : "Not running");
+	const says = {
+		ours: `Running at ${openAt()}`,
+		older: onPort.lost ? `Pathways is running at ${URL$1}, but macOS cleared its launch token: /pathways restarts it` : `${onPort.version ? `Pathways ${onPort.version}` : "An earlier copy of Pathways"} is running at ${URL$1}: /pathways replaces it with ${version()}`,
+		locked: `Not running here: port ${PORT} has a copy of Pathways from another Mac account on this computer`,
+		other: `Not running: port ${PORT} is taken by something else`,
+		free: "Not running"
+	};
+	console.log(says[onPort.state]);
 	console.log(`Working folder: ${workingFolderPath()}\nVersion: ${version()}`);
 	return 0;
 }
@@ -1913,14 +2023,28 @@ async function serve() {
 		});
 		writeFileSync(TOKEN_FILE, randomBytes(32).toString("hex"), { mode: 384 });
 	}
+	const token = readToken();
 	const server = await startServer({
 		port: PORT,
 		appDir: path.join(ROOT, "app"),
 		mapDir: path.join(ROOT, "map"),
 		landscapeDir: path.join(ROOT, "landscape"),
-		token: readToken()
+		token,
+		version: version()
 	});
 	console.log(`${(/* @__PURE__ */ new Date()).toISOString()} Pathways ${version()} running at ${URL$1}, reading ${workingFolderPath()}`);
+	setInterval(() => {
+		try {
+			if (existsSync(TOKEN_FILE)) utimesSync(TOKEN_FILE, /* @__PURE__ */ new Date(), /* @__PURE__ */ new Date());
+			else {
+				mkdirSync(STATE, {
+					recursive: true,
+					mode: 448
+				});
+				writeFileSync(TOKEN_FILE, token, { mode: 384 });
+			}
+		} catch {}
+	}, 216e5).unref();
 	const close = () => server.close(() => process.exit(0));
 	process.on("SIGTERM", close);
 	process.on("SIGINT", close);

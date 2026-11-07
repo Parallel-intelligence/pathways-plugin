@@ -16,7 +16,7 @@ The tool's commands go through one starter: `sh "${CLAUDE_PLUGIN_ROOT}/start.sh"
 sh "${CLAUDE_PLUGIN_ROOT}/start.sh" "${CLAUDE_PLUGIN_DATA}" start
 ```
 
-The first run downloads Node and cloudflared, which takes a minute: say so. Then it checks the laptop (disk encryption, Node, cloudflared, Apple's developer tools, Python 3, the `claude` command, the working folder, the port), makes the working folder if it's missing, and runs the tool in the background, where it keeps running after this chat ends. If it's already running, it says so and leaves it.
+The first run downloads Node and cloudflared, which takes a minute: say so. Then it checks the laptop (disk encryption, Node, cloudflared, Apple's developer tools, Python 3, the `claude` command, the working folder, the port), makes the working folder if it's missing, and runs the tool in the background, where it keeps running after this chat ends. If it's already running, it says so and leaves it; if an older version of it is running (from before an update), it replaces it, unless that one is in the middle of something.
 
 - **Exit 3:** macOS has opened a window to install Apple's developer tools. Tell the person to click Install, wait for it to finish (a few minutes), then type /pathways again. Stop there.
 - **Exit 1:** something must be fixed first. Tell the person each ✗ line and its fix, in plain words, and stop. Don't work around a check, and don't install anything yourself: the starter and macOS do.

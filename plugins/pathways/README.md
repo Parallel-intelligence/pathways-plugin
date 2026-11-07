@@ -10,16 +10,15 @@ Fetch latest also brings down three settings records a person saves once: the in
 
 ## Install
 
-Once per person, in Claude Code:
+Once per person. The Claude desktop app can't add a marketplace (no `/plugin marketplace add`, no button), so the person pastes a message asking Claude to run the CLI that ships inside the app; the public repo's README has the exact wording (`apps/ui/release/README.md`). In a terminal it's:
 
+```bash
+claude plugin install pathways --marketplace Parallel-intelligence/pathways-plugin
 ```
-/plugin marketplace add Parallel-intelligence/pathways-plugin
-/plugin install pathways@pathways
-```
 
-Then `/pathways` in a new chat. Updates: `/plugin marketplace update pathways`, then `/plugin update pathways@pathways`. If you added the team's earlier marketplace (the cms repo, also named `pathways`), remove it first with `/plugin marketplace remove pathways`.
+Then `/pathways` in a new chat. It clones over public HTTPS, so it needs git (Apple's developer tools) but no GitHub account. Updates: `claude plugin marketplace update pathways && claude plugin update pathways@pathways`, then a new chat. If you added the team's earlier marketplace (the cms repo, also named `pathways`), remove it first with `claude plugin marketplace remove pathways`.
 
-`Parallel-intelligence/pathways-plugin` is public and holds only this built plugin, copied fresh from a reviewed commit: the method and the code, never client data, and never the client's name, which the tool learns from the admin Worker after sign-in. Until it's set up, the team installs from the cms repo as before.
+`Parallel-intelligence/pathways-plugin` is public and holds only this built plugin, copied fresh from a reviewed commit (`apps/ui/scripts/release-plugin.mjs`): the method and the code, never client data, and never the client's name, which the tool learns from the admin Worker after sign-in.
 
 ## What's in it
 
@@ -37,4 +36,4 @@ Don't edit the built parts by hand. After changing the tool, rebuild and commit 
 pnpm --filter @pathways/ui plugin
 ```
 
-The tool listens on `127.0.0.1:5180` only and answers this machine's own address. Its process id and log are in the person's temporary folder (`$TMPDIR/pathways`). Nothing in this plugin holds client data: documents and what's built from them live in the working folder, outside git.
+The tool listens on `127.0.0.1:5180` only and answers this machine's own address. Its log and launch token are in the person's temporary folder (`$TMPDIR/pathways`); the running tool keeps the token file from being cleared. `start` counts a tool already on the port as its own only if it takes that token (`/api/ping`, which also gives its version): an older version of the person's own is replaced, unless it's in the middle of Analyse, Fetch latest or publishing (or doesn't say), and one started from another Mac account on the same computer is reported, not opened. Stopping signals only a process that lsof shows as the person's own on the tool's address and ps shows as `pathways.mjs serve`. Nothing in this plugin holds client data: documents and what's built from them live in the working folder, outside git.
