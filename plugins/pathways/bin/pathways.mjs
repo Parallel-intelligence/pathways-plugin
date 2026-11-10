@@ -1,8 +1,12 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { accessSync, constants, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { accessSync, constants, cpSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { open } from "node:fs/promises";
+import { once } from "node:events";
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 import http from "node:http";
 //#region workspace.ts
 var RULES = path.resolve(import.meta.dirname, "../../packages/landscape/rules");
@@ -404,7 +408,7 @@ function adminUrl(value) {
 	if (url.origin === OUR_WORKER || url.protocol === "http:" && url.hostname === "127.0.0.1") return url.origin;
 	throw new Error(`PATHWAYS_ADMIN_URL must be ${OUR_WORKER}, or a test Worker on http://127.0.0.1`);
 }
-var SHA256 = /^[0-9a-f]{64}$/;
+var SHA256$1 = /^[0-9a-f]{64}$/;
 var UPLOAD_TYPES = {
 	".pdf": "application/pdf",
 	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -438,17 +442,17 @@ function accessToken() {
 	});
 }
 /** A call to the Worker as the signed-in person. Access answers a redirect to its login page when the token isn't good. */
-var worker = (route, token, init = {}) => fetch(`${ADMIN_URL}${route}`, {
+var worker = (route, token, init = {}, timeoutMs = 12e4) => fetch(`${ADMIN_URL}${route}`, {
 	...init,
 	headers: {
 		...init.headers,
 		"cf-access-token": token
 	},
 	redirect: "manual",
-	signal: AbortSignal.timeout(12e4)
+	signal: AbortSignal.timeout(timeoutMs)
 });
 /** The Worker's own words when it refuses something ({ error }), or its status. */
-var refusal = async (response) => (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
+var refusal$1 = async (response) => (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
 async function signedInToken() {
 	const token = await accessToken();
 	if (!token || token === "missing") throw new Error("Sign in first.");
@@ -533,7 +537,7 @@ async function fetchLatest() {
 	const listed = await worker("/v0/documents", token);
 	if (!listed.ok) throw new Error(`The admin Worker answered ${listed.status} for the document list.`);
 	const { documents } = await listed.json();
-	if (!documents.every((doc) => SHA256.test(doc.sha256))) throw new Error("The document list wasn't in the expected shape.");
+	if (!documents.every((doc) => SHA256$1.test(doc.sha256))) throw new Error("The document list wasn't in the expected shape.");
 	assertOutsideGit(workingFolderPath());
 	const folder = path.join(workingFolderPath(), "documents");
 	mkdirSync(folder, {
@@ -579,7 +583,7 @@ var isStructure = (value) => {
 async function fetchStructure(token) {
 	const response = await worker(STRUCTURE_RECORD, token);
 	if (response.status === 404) return;
-	if (!response.ok) throw new Error(await refusal(response));
+	if (!response.ok) throw new Error(await refusal$1(response));
 	const structure = await response.json();
 	if (!isStructure(structure)) throw new Error("The industries and markets in Cloudflare aren't in the expected shape.");
 	assertOutsideGit(workingFolderPath());
@@ -624,7 +628,7 @@ async function fetchSetting(token, record, name, check, what) {
 		rmSync(file, { force: true });
 		return;
 	}
-	if (!response.ok) throw new Error(await refusal(response));
+	if (!response.ok) throw new Error(await refusal$1(response));
 	const value = await response.json();
 	if (!check(value)) throw new Error(`${what} in Cloudflare isn't in the expected shape.`);
 	assertOutsideGit(workingFolderPath());
@@ -693,7 +697,7 @@ async function pushRecord(record, body) {
 	if (token === "missing") throw new Error("cloudflared isn't set up: type /pathways again, which sets it up.");
 	if (!token) throw new Error(`Sign in first: open the tool with /pathways and sign in, or run \`cloudflared access login ${ADMIN_URL}\` in Terminal, then run this again.`);
 	const current = await worker(record, token);
-	if (current.status !== 404 && !current.ok) throw new Error(await refusal(current));
+	if (current.status !== 404 && !current.ok) throw new Error(await refusal$1(current));
 	const etag = current.ok ? current.headers.get("ETag") : null;
 	const { holder, yours } = await (await worker("/v0/checkout", token)).json();
 	if (!yours && holder) throw new Error(`${holder} has the library checked out.`);
@@ -707,7 +711,7 @@ async function pushRecord(record, body) {
 			},
 			body
 		});
-		if (!saved.ok) throw new Error(await refusal(saved));
+		if (!saved.ok) throw new Error(await refusal$1(saved));
 		return Boolean(etag);
 	} finally {
 		if (!yours) await worker("/v0/checkout", token, { method: "DELETE" });
@@ -723,12 +727,12 @@ async function upload(bytes, filename, confidentiality) {
 	const token = await signedInToken();
 	if (!tookCheckout) {
 		const checkout = await worker("/v0/checkout", token);
-		if (!checkout.ok) throw new Error(await refusal(checkout));
+		if (!checkout.ok) throw new Error(await refusal$1(checkout));
 		const { holder, yours } = await checkout.json();
 		if (!yours) {
 			if (holder) throw new Error(`${holder} has the library checked out, so nothing can be uploaded until they're done.`);
 			const taken = await worker("/v0/checkout", token, { method: "POST" });
-			if (!taken.ok) throw new Error(await refusal(taken));
+			if (!taken.ok) throw new Error(await refusal$1(taken));
 			tookCheckout = true;
 		}
 	}
@@ -743,7 +747,7 @@ async function upload(bytes, filename, confidentiality) {
 		},
 		body: new Uint8Array(bytes)
 	});
-	if (!response.ok) throw new Error(await refusal(response));
+	if (!response.ok) throw new Error(await refusal$1(response));
 	assertOutsideGit(workingFolderPath());
 	const folder = path.join(workingFolderPath(), "documents");
 	mkdirSync(folder, {
@@ -830,6 +834,274 @@ function cloudflareHandler() {
 			return json$3(res, 202, job$2);
 		}
 		return json$3(res, 404, { error: "Not found" });
+	};
+}
+//#endregion
+//#region standalone/dev.ts
+var DEV_FOLDERS = [
+	"landscape",
+	"sources",
+	"client"
+];
+var PART_BYTES = 67108864;
+var BATCH = 1e4;
+var RENEW_MS = 18e5;
+var SKIP = /* @__PURE__ */ new Set([
+	".DS_Store",
+	".git",
+	"node_modules",
+	"Thumbs.db"
+]);
+var SCRATCH = /-(wal|shm|journal)$/;
+var SHA256 = /^[0-9a-f]{64}$/;
+var SNAPSHOT_ID = /^\d{8}T\d{9}Z$/;
+var sum = (files) => files.reduce((total, file) => total + file.bytes, 0);
+var size = (bytes) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(1)} MB`;
+/** The Worker's own words when it refuses something, or its status. */
+async function refusal(response) {
+	return (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
+}
+async function ok(response) {
+	if (!response.ok) throw new Error(await refusal(response));
+	return response;
+}
+var postJson = (call, route, value, headers = {}, timeoutMs) => call(route, {
+	method: "POST",
+	headers: {
+		"Content-Type": "application/json",
+		...headers
+	},
+	body: JSON.stringify(value)
+}, timeoutMs);
+/** Why a snapshot path can't be written, or null: relative, inside one of DEV_FOLDERS, no empty, dot or .git segments. */
+function pathProblem(file) {
+	if (typeof file !== "string" || file.length === 0 || file.length > 1024) return "has the wrong length";
+	if (/[\u0000-\u001f\u007f\\]/.test(file)) return "has a control character or a backslash";
+	const parts = file.split("/");
+	if (parts.length < 2 || !DEV_FOLDERS.includes(parts[0])) return "isn't inside one of the three folders";
+	if (parts.some((part) => part === "" || part === "." || part === "..")) return "has an empty, . or .. segment";
+	if (parts.some((part) => part.toLowerCase() === ".git")) return "has a .git segment";
+	return null;
+}
+/** Every file to push under the working folder's three folders, by path. Links are skipped, never followed. */
+function listFolder(root) {
+	const files = [];
+	let skipped = 0;
+	const walk = (dir, relative) => {
+		for (const name of readdirSync(dir).sort()) {
+			if (SKIP.has(name) || SCRATCH.test(name)) continue;
+			const file = path.join(dir, name);
+			const relativePath = `${relative}/${name}`;
+			const stat = lstatSync(file);
+			if (stat.isDirectory()) walk(file, relativePath);
+			else if (stat.isFile() && !pathProblem(relativePath)) files.push({
+				path: relativePath,
+				file,
+				bytes: stat.size
+			});
+			else skipped++;
+		}
+	};
+	for (const folder of DEV_FOLDERS) {
+		const dir = path.join(root, folder);
+		if (existsSync(dir) && lstatSync(dir).isDirectory()) walk(dir, folder);
+	}
+	return {
+		files,
+		skipped
+	};
+}
+async function hashFile(file) {
+	const hash = createHash("sha256");
+	for await (const chunk of createReadStream(file)) hash.update(chunk);
+	return hash.digest("hex");
+}
+async function readPart(file, start, length) {
+	const handle = await open(file, "r");
+	try {
+		const buffer = Buffer.alloc(length);
+		const { bytesRead } = await handle.read(buffer, 0, length, start);
+		if (bytesRead !== length) throw new Error("A file changed while it was being sent: push again.");
+		return buffer;
+	} finally {
+		await handle.close();
+	}
+}
+async function uploadFile(call, file, partBytes) {
+	const route = `/v0/dev/blobs/${file.sha256}`;
+	if (file.bytes <= partBytes) {
+		const body = await readPart(file.file, 0, file.bytes);
+		await ok(await call(route, {
+			method: "PUT",
+			headers: {
+				"X-Content-SHA256": file.sha256,
+				"Content-Type": "application/octet-stream"
+			},
+			body
+		}, 9e5));
+		return;
+	}
+	const started = await (await ok(await call(`${route}/parts`, { method: "POST" }))).json();
+	if (started.existing || !started.uploadId || !started.partsKey) return;
+	const upload = {
+		"X-Pathways-Upload": started.uploadId,
+		"X-Pathways-Parts-Key": started.partsKey
+	};
+	const parts = [];
+	for (let start = 0, partNumber = 1; start < file.bytes; start += partBytes, partNumber++) {
+		const body = await readPart(file.file, start, Math.min(partBytes, file.bytes - start));
+		const sent = await ok(await call(`${route}/parts/${partNumber}`, {
+			method: "PUT",
+			headers: {
+				...upload,
+				"Content-Type": "application/octet-stream"
+			},
+			body
+		}, 9e5));
+		parts.push(await sent.json());
+	}
+	await ok(await postJson(call, `${route}/parts/complete`, { parts }, upload, 18e5));
+}
+/** Runs work holding the checkout, renewing it as it goes; releases it after, if it wasn't held before. */
+async function holdingCheckout(call, work) {
+	const current = await (await ok(await call("/v0/checkout"))).json();
+	if (!current.yours && current.holder) throw new Error(`${current.holder} has the library checked out, so nothing can be pushed until they're done.`);
+	await ok(await call("/v0/checkout", { method: "POST" }));
+	let renewed = Date.now();
+	const renew = async () => {
+		if (Date.now() - renewed < RENEW_MS) return;
+		await ok(await call("/v0/checkout", { method: "POST" }));
+		renewed = Date.now();
+	};
+	try {
+		return await work(renew);
+	} finally {
+		if (!current.yours) await call("/v0/checkout", { method: "DELETE" }).catch(() => null);
+	}
+}
+/** Sends the working folder to the dev bucket: only files it doesn't hold yet, then a snapshot of every path. */
+async function pushDev({ root, call, log = () => {}, partBytes = PART_BYTES }) {
+	const { files, skipped } = listFolder(root);
+	if (files.length === 0) throw new Error(`Nothing to push: ${root} has no files in ${DEV_FOLDERS.join("/, ")}/.`);
+	log(`Checking ${files.length} files (${size(sum(files))})${skipped ? `; skipping ${skipped} links or oddly named files` : ""}…`);
+	const hashed = [];
+	for (const file of files) {
+		hashed.push({
+			...file,
+			sha256: await hashFile(file.file)
+		});
+		if (hashed.length % 1e3 === 0) log(`  checked ${hashed.length} of ${files.length}`);
+	}
+	const unique = [...new Map(hashed.map((file) => [file.sha256, file])).values()];
+	return holdingCheckout(call, async (renew) => {
+		const missing = /* @__PURE__ */ new Set();
+		for (let start = 0; start < unique.length; start += BATCH) {
+			const answer = await (await ok(await postJson(call, "/v0/dev/blobs/missing", { sha256: unique.slice(start, start + BATCH).map((file) => file.sha256) }))).json();
+			for (const sha256 of answer.missing) missing.add(sha256);
+		}
+		const toSend = unique.filter((file) => missing.has(file.sha256));
+		log(`${toSend.length} files to send (${size(sum(toSend))}); the rest are already in the dev bucket.`);
+		let sent = 0;
+		for (const file of toSend) {
+			await renew();
+			await uploadFile(call, file, partBytes);
+			sent++;
+			if (sent % 100 === 0 || file.bytes > partBytes) log(`  sent ${sent} of ${toSend.length}`);
+		}
+		return {
+			...await (await ok(await postJson(call, "/v0/dev/snapshots", { files: hashed.map(({ path: filePath, sha256, bytes }) => ({
+				path: filePath,
+				sha256,
+				bytes
+			})) }))).json(),
+			sent: toSend.length,
+			sentBytes: sum(toSend)
+		};
+	});
+}
+/** The dev bucket's snapshots, newest first. */
+async function listSnapshots(call) {
+	const { snapshots } = await (await ok(await call("/v0/dev/snapshots"))).json();
+	return snapshots;
+}
+/** Reads a snapshot, checked against the SHA-256 the Worker recorded for it, and every path checked before use. */
+async function readSnapshot(call, id) {
+	if (!SNAPSHOT_ID.test(id)) throw new Error("That isn't a snapshot id.");
+	const response = await ok(await call(`/v0/dev/snapshots/${id}`));
+	const bytes = Buffer.from(await response.arrayBuffer());
+	if (createHash("sha256").update(bytes).digest("hex") !== response.headers.get("X-Content-SHA256")) throw new Error("The snapshot didn't match its checksum.");
+	const snapshot = JSON.parse(bytes.toString("utf8"));
+	if (!(Array.isArray(snapshot.files) && snapshot.files.every((file) => !pathProblem(file.path) && SHA256.test(file.sha256) && Number.isSafeInteger(file.bytes) && file.bytes >= 0))) throw new Error("The snapshot wasn't in the expected shape.");
+	return snapshot;
+}
+/** Refuses a path whose folders, or the file itself, are links: a write must never be sent somewhere else, such as a repo. */
+function refuseLinks(root, relative) {
+	let at = root;
+	for (const part of relative.split("/")) {
+		at = path.join(at, part);
+		if (!existsSync(at)) return;
+		if (lstatSync(at).isSymbolicLink()) throw new Error("The folder holds a link where a pulled file would go, so nothing more was written.");
+	}
+}
+/**
+* Brings a snapshot (the latest by default) down into a folder. Files already there and intact are kept; nothing is
+* deleted or replaced: if any file differs from the snapshot, it stops before writing.
+*/
+async function pullDev({ target, call, id, log = () => {} }) {
+	const chosen = id ?? (await listSnapshots(call))[0]?.id;
+	if (!chosen) throw new Error("The dev bucket has no snapshots yet: someone runs push-dev first.");
+	const snapshot = await readSnapshot(call, chosen);
+	const root = path.resolve(target);
+	log(`Snapshot ${snapshot.id}, pushed by ${snapshot.pushedBy}: ${snapshot.files.length} files (${size(sum(snapshot.files))}).`);
+	const wanted = [];
+	let kept = 0;
+	let differ = 0;
+	for (const file of snapshot.files) {
+		const destination = path.join(root, ...file.path.split("/"));
+		if (!destination.startsWith(root + path.sep)) throw new Error("A snapshot path points outside the folder.");
+		refuseLinks(root, file.path);
+		if (!existsSync(destination)) wanted.push({
+			file,
+			destination
+		});
+		else if (statSync(destination).size === file.bytes && await hashFile(destination) === file.sha256) kept++;
+		else differ++;
+	}
+	if (differ > 0) throw new Error(`${differ} files in ${root} differ from snapshot ${snapshot.id}, so nothing was written. Push them first, or pull into an empty folder.`);
+	let fetched = 0;
+	for (const { file, destination } of wanted) {
+		mkdirSync(path.dirname(destination), {
+			recursive: true,
+			mode: 448
+		});
+		if (!realpathSync(path.dirname(destination)).startsWith(realpathSync(root) + path.sep)) throw new Error("A pulled file would land outside the folder, so nothing more was written.");
+		const response = await ok(await call(`/v0/dev/blobs/${file.sha256}`, {}, 36e5));
+		if (!response.body) throw new Error("A download came back empty.");
+		const hash = createHash("sha256");
+		const part = `${destination}.part`;
+		const out = createWriteStream(part, {
+			mode: 384,
+			flags: "wx"
+		});
+		for await (const chunk of Readable.fromWeb(response.body)) {
+			hash.update(chunk);
+			if (!out.write(chunk)) await once(out, "drain");
+		}
+		out.end();
+		await finished(out);
+		if (hash.digest("hex") !== file.sha256) {
+			rmSync(part, { force: true });
+			throw new Error("A download didn't match its checksum, so it wasn't kept.");
+		}
+		renameSync(part, destination);
+		fetched++;
+		if (fetched % 100 === 0) log(`  fetched ${fetched} of ${wanted.length}`);
+	}
+	return {
+		id: snapshot.id,
+		files: snapshot.files.length,
+		fetched,
+		kept
 	};
 }
 //#endregion
@@ -1388,7 +1660,7 @@ var job = {
 };
 async function listVersions(token) {
 	const response = await worker("/v0/versions", token);
-	if (!response.ok) throw new Error(await refusal(response));
+	if (!response.ok) throw new Error(await refusal$1(response));
 	const { live, liveKind, versions } = await response.json();
 	const published = versions.filter((each) => each.status === "published");
 	return {
@@ -1424,12 +1696,12 @@ async function versionsForPage() {
 /** Runs `work` holding the library's checkout: taken if it's free, given back after if it was taken here. */
 async function withCheckout(token, action, work) {
 	const checkout = await worker("/v0/checkout", token);
-	if (!checkout.ok) throw new Error(await refusal(checkout));
+	if (!checkout.ok) throw new Error(await refusal$1(checkout));
 	const { holder, yours } = await checkout.json();
 	if (!yours && holder) throw new Error(`${holder} has the library checked out, so nothing can be ${action} until they're done.`);
 	if (!yours) {
 		const taken = await worker("/v0/checkout", token, { method: "POST" });
-		if (!taken.ok) throw new Error(await refusal(taken));
+		if (!taken.ok) throw new Error(await refusal$1(taken));
 	}
 	try {
 		return await work();
@@ -1443,14 +1715,14 @@ async function rollback(version) {
 	const token = await signedInToken();
 	return withCheckout(token, "rolled back", async () => {
 		const moved = await worker("/v0/live", token, jsonBody({ version }));
-		if (!moved.ok) throw new Error(await refusal(moved));
+		if (!moved.ok) throw new Error(await refusal$1(moved));
 		return await moved.json();
 	});
 }
 /** The files a version received, by path. */
 async function received(token, version) {
 	const response = await worker(`/v0/versions/${version}`, token);
-	if (!response.ok) throw new Error(await refusal(response));
+	if (!response.ok) throw new Error(await refusal$1(response));
 	const { files } = await response.json();
 	return new Map(files.map((file) => [file.path, file.sha256]));
 }
@@ -1478,7 +1750,7 @@ async function publish(files, note) {
 		const { live, latest, building } = await listVersions(token);
 		if (latest > 0 && live !== versionName(latest) && same(await received(token, versionName(latest)))) {
 			const finished = await worker(`/v0/versions/${versionName(latest)}/seal`, token, jsonBody({}));
-			if (!finished.ok) throw new Error(await refusal(finished));
+			if (!finished.ok) throw new Error(await refusal$1(finished));
 			await mustBeLive(finished);
 			job = {
 				...job,
@@ -1493,7 +1765,7 @@ async function publish(files, note) {
 			if ([...await received(token, building)].every(([name, sha256]) => entries.some((entry) => entry.path === name && entry.sha256 === sha256))) version = building;
 			else {
 				const abandoned = await worker(`/v0/versions/${building}/abandon`, token, { method: "POST" });
-				if (!abandoned.ok) throw new Error(await refusal(abandoned));
+				if (!abandoned.ok) throw new Error(await refusal$1(abandoned));
 			}
 		}
 		if (!version) {
@@ -1501,7 +1773,7 @@ async function publish(files, note) {
 				baseVersion: latest,
 				note: note.trim() || void 0
 			}));
-			if (!started.ok) throw new Error(await refusal(started));
+			if (!started.ok) throw new Error(await refusal$1(started));
 			version = (await started.json()).version;
 		}
 		job = {
@@ -1519,7 +1791,7 @@ async function publish(files, note) {
 				},
 				body: new Uint8Array(entry.bytes)
 			});
-			if (!sent.ok) throw new Error(await refusal(sent));
+			if (!sent.ok) throw new Error(await refusal$1(sent));
 			job = {
 				...job,
 				done: job.done + 1
@@ -1532,7 +1804,7 @@ async function publish(files, note) {
 			})),
 			documents
 		}));
-		if (!sealed.ok) throw new Error(`${await refusal(sealed)}${sealed.status >= 500 ? " Press Publish again to finish." : ""}`);
+		if (!sealed.ok) throw new Error(`${await refusal$1(sealed)}${sealed.status >= 500 ? " Press Publish again to finish." : ""}`);
 		await mustBeLive(sealed);
 	});
 }
@@ -1648,6 +1920,15 @@ function pageFiles(appDir) {
 		res.end(req.method === "HEAD" ? void 0 : readFileSync(file));
 	};
 }
+/** A challenge from `pathways start` (cli.ts): 32 random bytes in hex. */
+var CHALLENGE = /^[0-9a-f]{64}$/;
+/**
+* The tool's answer to a challenge from `pathways start`: an HMAC of it under the launch token, so the tool proves
+* it holds the token and the starter never sends the token to whatever holds the port. The token is used nowhere
+* else as an HMAC key, and the label keeps these answers from meaning anything outside this check. The port is in
+* it too, so a listener on another port can't pass the challenge on to the real tool and answer for it.
+*/
+var pingProof = (token, port, challenge) => createHmac("sha256", token).update(`pathways ping ${port} ${challenge}`).digest("hex");
 /** The API and anything that changes something: the page's own files and the map page's GETs need no token. */
 var needsToken = (req) => {
 	const route = (req.url ?? "/").split("?")[0];
@@ -1672,17 +1953,22 @@ function startServer({ port, appDir, mapDir, landscapeDir, token, version }) {
 	const server = http.createServer((req, res) => {
 		if (!ownHost.test(req.headers.host ?? "")) return refuse(res, 403, "Forbidden");
 		if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) return refuse(res, 403, "Forbidden");
-		if (needsToken(req) && !tokenOk(req)) return refuse(res, 403, "Forbidden: reopen the tool from /pathways");
 		if (req.method === "GET" && req.url === "/api/ping") {
-			res.writeHead(200, {
-				...SECURITY_HEADERS,
-				"Content-Type": "application/json; charset=utf-8"
-			});
-			return res.end(JSON.stringify({
-				tool: "pathways",
-				version
-			}));
+			const challenge = String(req.headers["x-pathways-challenge"] ?? "");
+			const proof = CHALLENGE.test(challenge) ? pingProof(token, port, challenge) : void 0;
+			if (proof || tokenOk(req)) {
+				res.writeHead(200, {
+					...SECURITY_HEADERS,
+					"Content-Type": "application/json; charset=utf-8"
+				});
+				return res.end(JSON.stringify({
+					tool: "pathways",
+					version,
+					proof
+				}));
+			}
 		}
+		if (needsToken(req) && !tokenOk(req)) return refuse(res, 403, "Forbidden: reopen the tool from /pathways");
 		const next = (index) => () => routes[index](req, res, next(index + 1));
 		try {
 			next(0)();
@@ -1701,7 +1987,7 @@ function startServer({ port, appDir, mapDir, landscapeDir, token, version }) {
 var ROOT = path.resolve(import.meta.dirname, "..");
 var PORT = Number(process.env.PATHWAYS_PORT) || 5180;
 var URL$1 = `http://127.0.0.1:${PORT}`;
-var STATE = path.join(os.tmpdir(), "pathways");
+var STATE = path.join(os.tmpdir(), PORT === 5180 ? "pathways" : `pathways-${PORT}`);
 var LOG_FILE = path.join(STATE, "server.log");
 var TOKEN_FILE = path.join(STATE, "token");
 var readToken = () => existsSync(TOKEN_FILE) ? readFileSync(TOKEN_FILE, "utf8").trim() : "";
@@ -1755,40 +2041,91 @@ function ownServers() {
 		}
 	});
 }
+/** A call to the tool with the launch token. Only to a tool that proved it holds the token, or this person's own process. */
 var ask = (route) => fetch(`${URL$1}${route}`, {
 	headers: { "x-pathways-token": readToken() },
 	signal: AbortSignal.timeout(1500)
 });
+/** A reply's JSON object, or an empty one for anything else. */
+var replyObject = (body) => {
+	try {
+		const value = JSON.parse(body);
+		return value && typeof value === "object" ? value : {};
+	} catch {
+		return {};
+	}
+};
+/** Whether the page on the port is the tool's own: the only sign from a tool before 0.9.2, which had no /api/ping. */
+async function titled() {
+	try {
+		return (await (await fetch(URL$1, { signal: AbortSignal.timeout(1500) })).text()).includes("<title>Pathways CMS</title>");
+	} catch {
+		return false;
+	}
+}
+/**
+* The tool proves it holds the launch token by answering a fresh challenge (pingProof), so the token never goes to
+* whatever else holds the port, such as a listener from another Mac account. A tool from before 0.9.3 can't, so
+* the token goes only to a process lsof and ps show as this person's own (legacyPort).
+*/
 async function port() {
+	const challenge = randomBytes(32).toString("hex");
 	let response;
 	try {
-		response = await ask("/api/ping");
+		response = await fetch(`${URL$1}/api/ping`, {
+			headers: { "x-pathways-challenge": challenge },
+			signal: AbortSignal.timeout(1500)
+		});
 	} catch (error) {
 		return { state: error.cause?.code === "ECONNREFUSED" ? "free" : "other" };
 	}
 	const body = await response.text().catch(() => "");
-	if (response.status === 403 && body.includes("reopen the tool from /pathways")) return ownServers().length ? {
-		state: "older",
-		lost: true
-	} : { state: "locked" };
 	if (response.ok) {
-		try {
-			const { tool, version: running } = JSON.parse(body);
-			if (tool === "pathways" && typeof running === "string" && SEMVER.test(running)) return {
-				state: olderThan(running, version()) ? "older" : "ours",
-				version: running
-			};
-		} catch {}
-		return { state: "other" };
+		const { tool, version: running, proof } = replyObject(body);
+		if (tool !== "pathways" || typeof running !== "string" || !SEMVER.test(running)) return { state: "other" };
+		const token = readToken();
+		if (token && proof === pingProof(token, PORT, challenge)) return {
+			state: olderThan(running, version()) ? "older" : "ours",
+			version: running
+		};
+		return ownServers().length ? {
+			state: "older",
+			lost: true
+		} : { state: "locked" };
 	}
-	if (response.status === 404) try {
-		if ((await (await fetch(URL$1, { signal: AbortSignal.timeout(1500) })).text()).includes("<title>Pathways CMS</title>")) return { state: "older" };
-	} catch {}
+	if (response.status === 403 && body.includes("reopen the tool from /pathways")) return ownServers().length ? legacyPort() : { state: "locked" };
+	if (response.status === 404 && ownServers().length && await titled()) return { state: "older" };
 	return { state: "other" };
 }
+/** A tool from 0.7 to 0.9.2 that lsof and ps show is this person's own: only then does it get the token. */
+async function legacyPort() {
+	let response;
+	try {
+		response = await ask("/api/ping");
+	} catch {
+		return { state: "other" };
+	}
+	const body = await response.text().catch(() => "");
+	if (response.status === 403) return {
+		state: "older",
+		lost: true
+	};
+	if (response.ok) {
+		const { tool, version: running } = replyObject(body);
+		return tool === "pathways" && typeof running === "string" && SEMVER.test(running) ? {
+			state: "older",
+			version: running
+		} : { state: "other" };
+	}
+	return response.status === 404 && await titled() ? { state: "older" } : { state: "other" };
+}
+/** What busyWith says of a tool that didn't answer clearly. */
+var UNSAID = "something it didn't say";
+/** The fix when a running tool can't say whether it's busy: the person decides, since stopping it would cut that off. */
+var STOP_FIRST = "If it isn't in the middle of Analyse, Fetch latest or publishing, type stop Pathways, then /pathways again.";
 /**
-* What this person's running tool is in the middle of, if anything: stopping it now would cut that off. A tool
-* that doesn't answer clearly counts as busy.
+* What this person's running tool is in the middle of, if anything: stopping it now would cut that off. Only a
+* clear "not running" counts as idle; an error or a reply that doesn't say counts as busy.
 */
 async function busyWith() {
 	for (const [route, what] of [
@@ -1798,9 +2135,11 @@ async function busyWith() {
 	]) try {
 		const response = await ask(route);
 		if (response.status === 404) continue;
-		if ((await response.json()).running) return what;
+		const { running } = replyObject(await response.text());
+		if (response.ok && running === false) continue;
+		return response.ok && running === true ? what : UNSAID;
 	} catch {
-		return "something it didn't say";
+		return UNSAID;
 	}
 	return null;
 }
@@ -1912,11 +2251,12 @@ async function checkUp() {
 	const onPort = await port();
 	if (onPort.state === "ours") pass(`Already running at ${URL$1}`);
 	else if (onPort.state === "free") pass(`Port ${PORT} is free`);
-	else if (onPort.lost) pass("Pathways is already running, but macOS cleared its launch token: starting restarts it");
+	else if (onPort.lost) fail("Pathways is already running, but its launch token is gone, so it can't say whether it's in the middle of something", STOP_FIRST);
 	else if (onPort.state === "older") {
 		const running = onPort.version ? `Pathways ${onPort.version}` : "An earlier copy of Pathways";
 		const busy = await busyWith();
-		if (busy) fail(`${running} is still running, in the middle of ${busy}`, `Let it finish in the tool, then type /pathways again to switch to Pathways ${version()}.`);
+		if (busy === UNSAID) fail(`${running} is still running, and didn't say whether it's in the middle of something`, STOP_FIRST);
+		else if (busy) fail(`${running} is still running, in the middle of ${busy}`, `Let it finish in the tool, then type /pathways again to switch to Pathways ${version()}.`);
 		else pass(`${running} is still running: starting replaces it with Pathways ${version()}`);
 	} else if (onPort.state === "locked") fail(`Port ${PORT} has a copy of Pathways that was started from another Mac account on this computer`, "Stop it from that account (type stop Pathways in Claude there), or restart this Mac, then type /pathways again.");
 	else fail(`Port ${PORT} is taken by something else`, `Stop whatever is using port ${PORT}, then run /pathways again.`);
@@ -2005,7 +2345,7 @@ async function status() {
 	const onPort = await port();
 	const says = {
 		ours: `Running at ${openAt()}`,
-		older: onPort.lost ? `Pathways is running at ${URL$1}, but macOS cleared its launch token: /pathways restarts it` : `${onPort.version ? `Pathways ${onPort.version}` : "An earlier copy of Pathways"} is running at ${URL$1}: /pathways replaces it with ${version()}`,
+		older: onPort.lost ? `Pathways is running at ${URL$1}, but its launch token is gone, so /pathways can't open it or ask whether it's busy. Once it isn't in the middle of anything, stop it (stop Pathways), then type /pathways again` : `${onPort.version ? `Pathways ${onPort.version}` : "An earlier copy of Pathways"} is running at ${URL$1}: /pathways replaces it with ${version()}`,
 		locked: `Not running here: port ${PORT} has a copy of Pathways from another Mac account on this computer`,
 		other: `Not running: port ${PORT} is taken by something else`,
 		free: "Not running"
@@ -2095,6 +2435,62 @@ async function pushFactorsCommand() {
 		return 1;
 	}
 }
+/** Calls the admin Worker as the signed-in person (cloudflared holds the token). */
+async function signedInCall() {
+	const token = await signedInToken();
+	return (route, init, timeoutMs) => worker(route, token, init, timeoutMs);
+}
+async function pushDevCommand() {
+	try {
+		const root = path.resolve(process.argv[3] ?? workingFolderPath());
+		assertOutsideGit(root);
+		const pushed = await pushDev({
+			root,
+			call: await signedInCall(),
+			log: console.log
+		});
+		console.log(`Pushed snapshot ${pushed.id} to the dev bucket: ${pushed.files} files (${size(pushed.bytes)}), ${pushed.sent} of them new (${size(pushed.sentBytes)}).`);
+		return 0;
+	} catch (error) {
+		console.log(error.message);
+		return 1;
+	}
+}
+async function pullDevCommand() {
+	try {
+		const target = path.resolve(process.argv[3] ?? workingFolderPath());
+		let existing = target;
+		while (!existsSync(existing)) existing = path.dirname(existing);
+		assertOutsideGit(existing);
+		mkdirSync(target, {
+			recursive: true,
+			mode: 448
+		});
+		assertOutsideGit(target);
+		const pulled = await pullDev({
+			target,
+			id: process.argv[4],
+			call: await signedInCall(),
+			log: console.log
+		});
+		console.log(`Pulled snapshot ${pulled.id} into ${target}: ${pulled.fetched} files fetched, ${pulled.kept} already there.`);
+		return 0;
+	} catch (error) {
+		console.log(error.message);
+		return 1;
+	}
+}
+async function devSnapshotsCommand() {
+	try {
+		const snapshots = await listSnapshots(await signedInCall());
+		if (snapshots.length === 0) console.log("The dev bucket has no snapshots yet.");
+		for (const each of snapshots) console.log(`${each.id}  ${each.pushedBy}  ${each.files} files  ${size(each.bytes)}`);
+		return 0;
+	} catch (error) {
+		console.log(error.message);
+		return 1;
+	}
+}
 var command = {
 	start,
 	stop,
@@ -2103,6 +2499,9 @@ var command = {
 	"push-structure": pushStructureCommand,
 	"push-sources": pushSourcesCommand,
 	"push-factors": pushFactorsCommand,
+	"push-dev": pushDevCommand,
+	"pull-dev": pullDevCommand,
+	"dev-snapshots": devSnapshotsCommand,
 	check: async () => {
 		const { checks, ready } = await checkUp();
 		print(checks);
@@ -2111,7 +2510,7 @@ var command = {
 	}
 }[process.argv[2] ?? ""];
 if (!command) {
-	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json>");
+	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | push-dev [folder] | pull-dev [folder] [snapshot] | dev-snapshots");
 	process.exit(1);
 }
 process.exit(await command());
