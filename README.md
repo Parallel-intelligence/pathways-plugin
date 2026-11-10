@@ -54,7 +54,7 @@ Please update the Pathways plugin by running: "$CLAUDE_CODE_EXECPATH" plugin mar
 If it fails, stop and show me the error.
 ```
 
-The next time you type `/pathways`, it switches to the new version by itself.
+The next time you type `/pathways`, it switches to the new version by itself, unless the running one is in the middle of something.
 
 ## About this repo
 
