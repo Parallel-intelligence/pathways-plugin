@@ -14,7 +14,7 @@ FINDINGS = ROOT / "landscape" / "evidence" / "findings"
 structure = json.loads((ROOT / "landscape" / "structure.json").read_text())
 industries = {i["slug"] for i in structure["industries"]}
 markets = {m["slug"] for m in structure["markets"]}
-GRADES = {"keep", "weak", "drop"}
+GRADES = {"keep", "weak", "drop", "panel"}  # panel: side panel only, no height (rules.md section 3)
 TYPES = {"demand", "behaviour", "spend", "trend", "supply"}
 MOTIVATIONS = {"Compete", "Connect", "Care", "Express", "Relief", "Play", "Growth", None}
 

@@ -18,13 +18,13 @@ from pathlib import Path
 if "ROOT" not in globals():  # ROOT (the working folder) and RULES come from build.py
     raise SystemExit("run this through build.py: python3 -I packages/landscape/build.py <working-folder> merge")
 EV = ROOT / "landscape" / "evidence"
-SETTINGS = json.loads((RULES / "settings.json").read_text())
+SETTINGS = RULE_SETTINGS()  # the rules, with the Settings page's saved ones (build.py rule_settings())
 MAX_MARKET = SETTINGS["mention"]["maxPerMarketPerDocument"]
 MAX_INDUSTRY = SETTINGS["mention"]["maxPerIndustryPerDocument"]
 structure = json.loads((ROOT / "landscape" / "structure.json").read_text())
 INDUSTRIES = {i["slug"] for i in structure["industries"]}
 MARKETS = {m["slug"] for m in structure["markets"]}
-RANK = {"keep": 2, "weak": 1, "drop": 0}
+RANK = {"keep": 2, "weak": 1, "drop": 0, "panel": 0}
 
 
 def norm(text):
@@ -77,6 +77,8 @@ for d in docs:
     common = Counter(grades).most_common()
     top = [g for g, n in common if n == common[0][1]]
     grade = d["sourceGrade"] if d.get("demandSurvey") and d.get("sourceGrade") else max(top, key=RANK.get)
+    if "panel" in grades:  # a panel document stays panel whatever its parts say: it never adds height
+        grade = "panel"
     doc = {**docblock, "id": d["id"], "title": d["title"], "grade": grade, "parts": d["parts"],
            "demandSurvey": d.get("demandSurvey", False), "url": d.get("url"), "partGrades": grades}
     doc.pop("part", None)

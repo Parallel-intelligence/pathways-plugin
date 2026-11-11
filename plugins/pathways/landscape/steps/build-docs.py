@@ -13,7 +13,8 @@ Writes landscape/map/docs.json:
   peaks: {industry or market slug: [{doc, adds, share, excerpts: [...]}]}, biggest first
   heights: {industry or market slug: height}, as build-map.py gave it
 
-Internal documents (licensed or internal-use sources) keep their contribution but carry no cover and no excerpts.
+Licensed or internal-use documents are shown like any other (10 Nov): excerpts, cover and link. `internal`
+only labels them as licensed.
 Covers: landscape/map/covers/<id>.jpg, made beforehand from each document's first page. Summaries:
 landscape/map/doc-summaries/*.json.
 """
@@ -24,14 +25,12 @@ from pathlib import Path
 
 if "ROOT" not in globals():  # ROOT (the working folder) and RULES come from build.py
     raise SystemExit("run this through build.py: python3 -I packages/landscape/build.py <working-folder> docs")
-FINDINGS = ROOT / "landscape" / "evidence" / "findings"
-MAP = ROOT / "landscape" / "map"
-SETTINGS = json.loads((RULES / "settings.json").read_text())
-GRADE_WEIGHT = SETTINGS["height"]["gradeWeight"]
-CAP = SETTINGS["height"]["perDocumentCap"]
-MIN_SALIENCE = SETTINGS["mention"]["minSalience"]
+MAP = MAP_DIR  # the same folder build-map.py wrote (build.py: PATHWAYS_CLIENT)
+SETTINGS = RULE_SETTINGS()  # the rules, with the Settings page's saved ones (build.py rule_settings())
+H = HEIGHTS()  # the same height settings as the map step (build.py heights())
+GRADE_WEIGHT, CAP, MIN_SALIENCE, recency = H["gradeWeight"], H["perDocumentCap"], H["minSalience"], H["recency"]
 MUST_VERIFY = SETTINGS["mention"].get("excerptMustVerify", True)
-INTERNAL = internal_sources()   # licensed or internal-use sources (build.py): count, never shown
+INTERNAL = internal_sources()   # licensed or internal-use sources (build.py): labelled, shown like any other
 
 bundle = json.loads((MAP / "bundle.json").read_text())
 market_industry = {r["slug"]: ind for ind, rows in bundle["subthemes"].items() for r in rows}
@@ -45,15 +44,17 @@ for path in sorted((MAP / "doc-summaries").glob("*.json")):
     summaries.update(json.loads(path.read_text()))
 
 docs, findings, proposals = {}, [], {}
-for path in sorted(FINDINGS.glob("*.json")):
-    data = json.loads(path.read_text())
+for data in EVIDENCE():
     doc = data["doc"]
     docs[doc["id"]] = doc
     findings += [{**f, "doc": doc["id"]} for f in data["findings"]]
-    proposals.update({f["id"]: {**f, "doc": doc["id"]} for f in data.get("proposals", [])})
+    proposals.update({f["id"]: {**f, "doc": doc["id"]} for f in data["proposals"]})
 
 # Markets added from evidence that made it onto the map carry their proposal findings.
-for m in json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]:
+minted = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
+if CLIENT and (ROOT / "client" / CLIENT / "minted-markets.json").exists():
+    minted += json.loads((ROOT / "client" / CLIENT / "minted-markets.json").read_text())["markets"]
+for m in minted:
     if m["slug"] in market_industry:
         findings += [{**proposals[ref], "level": "market", "slug": m["slug"]} for ref in m["evidence"] if ref in proposals]
 
@@ -86,7 +87,7 @@ for f in findings:
 
 def adds(peak, doc_id):
     s = sal.get((peak, doc_id), 0.0)
-    return GRADE_WEIGHT[docs[doc_id]["grade"]] * CAP * (1 - math.exp(-s / CAP))
+    return GRADE_WEIGHT[docs[doc_id]["grade"]] * recency(docs[doc_id].get("year")) * CAP * (1 - math.exp(-s / CAP))
 
 
 def excerpt(f):
@@ -105,7 +106,7 @@ for peak, doc_id in sorted(set(shown) | set(sal)):
         "doc": doc_id,
         "adds": round(a, 3),
         "share": round(a / heights[peak], 3) if heights.get(peak) else 0,
-        "excerpts": [] if internal(docs[doc_id]) else [excerpt(f) for f in fs],
+        "excerpts": [excerpt(f) for f in fs],
         "excerptCount": len(fs),
         "markets": sorted({f["slug"] for f in fs if f["level"] == "market"}),
         "general": any(f["level"] == "industry" for f in fs),
@@ -125,9 +126,9 @@ for doc_id, d in docs.items():
         "title": d["title"], "publisher": d["publisher"], "year": d["year"], "kind": d["kind"],
         "grade": d["grade"], "gradeReason": d["gradeReason"], "sample": d["sample"],
         "geography": d["geography"], "summary": summaries.get(doc_id, ""),
-        "cover": f"covers/{doc_id}.jpg" if cover.exists() and not internal(d) else None,
+        "cover": f"covers/{doc_id}.jpg" if cover.exists() else None,
         "internal": internal(d), "peaks": peak_count[doc_id],
-        "url": None if internal(d) else (d.get("url") or doc_meta.get(doc_id, {}).get("url")),
+        "url": d.get("url") or doc_meta.get(doc_id, {}).get("url"),
         "findings": sum(1 for f in findings if f["doc"] == doc_id and verified(f)),
     }
 

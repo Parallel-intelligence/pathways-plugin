@@ -106,7 +106,7 @@
   /* steps: 1 Structure · 2 Signal · 3 Uniqueness */
   .tabs .tab .ico{width:13px;height:13px;margin:-2px 6px 0 0;vertical-align:middle;fill:none;stroke:currentColor;
     stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-  .subset-tabs[hidden],.rule-tabs[hidden],.plays[hidden]{display:none}
+  .subset-tabs[hidden],.rule-tabs[hidden],.mode-tabs[hidden],.plays[hidden]{display:none}
   .label[data-layer="emergent"] .txt{font-style:italic}
   .label[data-layer="emergent"] .dot{width:8px;height:7px;border-radius:0;
     clip-path:polygon(50% 0,100% 100%,0 100%)}                  /* a solid triangle marks a new (emergent) theme */
@@ -302,11 +302,47 @@
   .panel .hook[hidden]{display:none}
   /* the selected theme's headline figures and facts: bento tiles in the 5% fill, a label over its value */
   .figures{display:flex;flex-direction:column;gap:6px}
-  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .kpis{display:grid;grid-template-columns:repeat(var(--kpi-cols,2),1fr);gap:6px}
+  .kpis div.perf-kpi{background:color-mix(in srgb, var(--accent) 12%, transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent)}
+  .kpis div.perf-kpi span{color:var(--ink)}
+  .gbar{display:block;margin-top:2px;width:100%}
+  .gbar-cap{display:flex;justify-content:space-between;gap:8px;margin-top:5px;font-family:var(--mono);font-size:10px;letter-spacing:0;text-transform:none;color:var(--ink-dim)}
+  .gbar-cap span:nth-child(2){color:var(--ink)}
+  .kpis .gbar-cap span{font-size:10px;letter-spacing:0;text-transform:none}
+  .kpis .gbar-cap span:nth-child(2){color:var(--ink)}
+  .stats dd .gbar{margin-top:8px}
   .kpis div,.stats div{display:flex;flex-direction:column-reverse;justify-content:flex-end;gap:10px;min-width:0;
     padding:11px 12px 12px;background:var(--off);border-radius:var(--radius)}
   .kpis b{font-family:var(--sans);font-weight:400;font-size:38px;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums;white-space:nowrap}
   .kpis span{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
+  /* the figures as separate cards with the document cards' own fill (.doc-card), then an Evidence section (9 Nov mockup) */
+  .figs{display:flex;flex-direction:column;gap:6px}
+  .figs .fig-card{background:var(--off);border-radius:var(--radius);padding:15px 16px 17px;min-width:0}
+  .figs .fig-lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:12px}
+  .figs .fig-big{display:block;font-family:var(--sans);font-weight:400;font-size:38px;line-height:1.15;padding-bottom:2px;letter-spacing:-.03em;font-variant-numeric:tabular-nums;white-space:nowrap}   /* room for descenders */
+  .figs .fig-none{font-family:var(--sans);font-size:15px;color:var(--ink)}   /* a value in words, set like the others */
+  .figs .fig-note{font-family:var(--mono);font-size:10px;color:var(--ink-dim);margin-top:10px}
+  .figs .fig-note:empty{display:none}
+  .figs .gbar{margin-top:16px}
+  .figs .gbar-cap{margin-top:8px}
+  .figs .gbar-cap span{color:var(--ink-dim)}
+  .figs .gbar-cap{position:relative}
+  .figs .gbar-cap span.gbar-range{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}   /* same style as the ends */
+  .figs .fig-names{font-size:14px;line-height:1.45;color:var(--ink)}
+  .figs .fig-evhead{margin:24px 0 8px}
+  .figs .fig-ev{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  /* Evidence is the top of the Documents section: heading, the two cards, then 12px to the tabs (as between the tabs and the cards below) */
+  .figures + #pEvidence{margin-top:-2px}   /* keeps 30px from the leaders card to the Evidence heading */
+  #pEvidenceTop{margin-bottom:12px}
+  #pEvidenceTop .fig-evhead{margin:0 0 8px}
+  .figs .pres-bar{display:flex;gap:2px;height:6px;margin-top:14px;border-radius:3px;overflow:hidden}
+  .figs .pres-bar i{display:block;min-width:3px}
+  .figs .pres-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:10px;color:var(--ink-dim)}   /* the document card meta line's colour (.doc-by) */
+  .figs .pres-legend b,.figs .pres-kinds b{font-weight:600;color:var(--ink)}
+  .figs .pres-kinds{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:14px;color:var(--ink-dim)}
+  #pEvidenceBrand:empty{display:none}
+  .figs .pres-legend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+  .kpis span.kpi-sub{font-size:10px;letter-spacing:0;text-transform:none;margin-top:-4px}
   .stats[hidden]{display:none}
   /* the verbatim passages behind the theme, a document at a time */
   .ev-meta{margin:-8px 0 14px;font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
@@ -357,10 +393,9 @@
   .doc-by .pub{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
   .grade{flex:none;font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:1px 6px;
     border:1px solid color-mix(in srgb, var(--accent) 45%, transparent);color:var(--ink);cursor:help}
-  .grade.keep{background:color-mix(in srgb, var(--accent) 16%, transparent)}
-  .grade.weak{color:var(--ink-dim)}
-  .grade.drop{border-style:dashed;color:var(--ink-dim)}
-  .grade.internal{border-style:dotted}
+  .grade.g-keep{background:color-mix(in srgb, var(--accent) 16%, transparent)}
+  .grade.g-weak{color:var(--ink-dim)}
+  .grade.g-drop{border-style:dashed;color:var(--ink-dim)}
   .doc-sum{margin:0;font-size:12px;line-height:1.45;color:var(--ink-dim);
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .doc-adds{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin-top:2px}
@@ -444,11 +479,11 @@
   .doc-peaks.big{gap:5px}
   .doc-peaks.big .doc-chip{font-size:10.5px;padding:5px 10px}
   .stats div.wide{grid-column:1/-1}
-  .stats div.wide dd{font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+  .stats div.wide dd{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
   .stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0}
   .stats div{flex-direction:column;justify-content:flex-start;gap:6px}
   .stats dt{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim)}
-  .stats dd{margin:0;font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  .stats dd{margin:0;font-family:var(--sans);font-size:14px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
   /* a section header, with an (i) on the right that explains the section */
   .sec-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px}
   .info{position:relative;flex:none;display:grid;place-items:center;width:24px;height:24px;margin-right:-4px;padding:0;
@@ -552,6 +587,7 @@
     </div>
     <div class="topright">
       <div class="controls">
+        <div class="tabs mode-tabs" role="tablist" aria-label="Hills"><button class="tab" role="tab" data-mode="normal" aria-selected="true" title="Height and width from evidence">Normal</button><button class="tab" role="tab" data-mode="performance" aria-selected="false" title="Height from growth a year, base width from market size; colours stay as in Normal">Performance</button></div>
         <button class="ctl" id="btnLibrary" type="button" aria-pressed="false" title="Every document the landscape is built on, as cards">Documents</button>
         <div class="tabs level-tabs" data-pane="both" role="tablist" aria-label="Level">
           <button class="tab" role="tab" data-level="themes" aria-selected="true" title="One peak per industry"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>Industries</button>
@@ -676,11 +712,11 @@
       <dl class="stats" id="pStats"></dl>
     </div>
     <section class="evidence" id="pEvidence" hidden>
-      <div class="sec-head">
-        <h3 class="lbl">Documents<span class="count" id="pEvidenceCount"></span></h3>
-        <button type="button" class="info" aria-label="About this section" aria-describedby="pEvidenceTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span class="tip" role="tooltip" id="pEvidenceTip">The documents behind this peak. The bar is the share of the peak's height each one adds: a strong source counts in full, a weak one at half, and one document can add at most 3. Open a card for its verbatim excerpts.</span></button>
+      <div class="figs" id="pEvidenceTop">
+        <div class="sec-head fig-evhead"><h3 class="lbl">Evidence</h3><button type="button" class="info" aria-label="About this section" aria-describedby="pEvidenceTip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span class="tip" role="tooltip" id="pEvidenceTip">The documents and excerpts behind this hill. On each card, the bar shows how much of the hill's height that document adds: a strong source counts in full, a weak one at half, and passing mentions add nothing. Open a card for its verbatim excerpts.</span></button></div>
+        <div id="pEvidenceBrand"></div>
+        <div class="fig-ev" id="pEvidenceKpis"></div>
       </div>
-      <p class="ev-meta" id="pEvidenceMeta"></p>
       <div id="pEvidenceBody"></div>
     </section>
     <section id="pDocument" aria-live="polite"></section>
