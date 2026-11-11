@@ -117,6 +117,37 @@
   let ruleSets = null, rule = null;   // fit-rule switch: the bundle's rules, the one shown
   let wellnessLandscape = null;
   let structureData = null;
+  // ---------- growth (data/growth, optional): {growth, perf, leaders}; a 404 turns Performance and the figures off ----------
+  // growth: size per industry (US$B, 2024: a published figure, else the base map's, else an even share of the sector),
+  //   with sizeLabel (what the panel shows; null = not sized) and cagr.
+  // perf: growth a year per industry and market: r = % a year, g = grade, lo/hi = likely range, b = how it is known,
+  //   src = source. Fit for ranking and slope, not for forecasts; Very low = placeholder.
+  // leaders: leading companies per industry (industry level only).
+  let GROWTH = {}, PERF = {}, LEADERS = {};
+  let GAX = [0, 1];   // the growth bars' shared scale, % a year (loadGrowth)
+  const hasGrowth = () => Object.keys(PERF).length>0;
+  async function loadGrowth(){
+    try{
+      const r=await fetch("data/growth",{cache:"no-store"});
+      const d = r.ok ? await r.json() : null;
+      const obj = x => x && typeof x==="object" && !Array.isArray(x) ? x : {};
+      GROWTH=obj(d?.growth); PERF=Object.fromEntries(Object.entries(obj(d?.perf)).filter(([,p])=>p && Number.isFinite(p.r))); LEADERS=obj(d?.leaders);
+    }catch(e){ GROWTH={}; PERF={}; LEADERS={}; }
+    const v=Object.values(PERF);
+    GAX = v.length ? [Math.min(0,...v.map(p=>p.lo??p.r)), Math.ceil(Math.max(...v.map(p=>p.hi??p.r)))] : [0, 1];
+    // no growth data: no Performance view (the switch hides), and the map stays in Normal
+    document.querySelector(".mode-tabs").hidden = !hasGrowth();
+    if(!hasGrowth()){ perfMode=false; colourP=footP=0; }
+    syncHillMode();
+  }
+  const startPerf = ['performance','growth'].includes(new URLSearchParams(location.search).get('view'));   // ?view=performance
+  let perfMode = startPerf;   // Performance keeps Normal's colours (decided 9 Nov)
+  // how far the map is from Normal (0) to Performance (1); frame() moves it towards its target
+  let colourP = startPerf ? 1 : 0, footP = startPerf ? 1 : 0;
+  const easeHill = p => p*p*(3-2*p), HILL_SECONDS = 0.7;
+  const growthOf = t => GROWTH[t.parentSlug || t.slug] || GROWTH[t.slug] || null;
+  // a market the sheet has no row for takes its industry's rate, as the sheet does for its own gaps
+  const perfOf = t => PERF[t.slug] || (PERF[t.parentSlug] && {...PERF[t.parentSlug], g:'Very low', b:'Not in the sheet: its industry\'s rate', lo:null, hi:null, sz:null, inherited:true}) || null;
   let industryCommunity = {};   // slug → community index
   let gwiMarket = null;             // from gwi-market.json (Monitor 2025 xlsx sync)
   // what a theme's height (and a bubble's size) encodes: the view's setting, sent with the bundle
@@ -265,12 +296,27 @@
       t.sources=Math.max(1, t.excerpts);
       t.marketUsdB=hillMarketUsdB(t);
       t.marketSource=hillMarketSource(t);
+      const gr=growthOf(t);
+      if(gr && !t.isSubTheme){ t.marketUsdB=gr.size; t.sizeLabel=gr.sizeLabel; t.sizeRough=gr.sizeRough; }
+      else if(!t.isSubTheme){ t.sizeLabel = t.nodeMarketUsdB!=null ? "$"+t.nodeMarketUsdB+"B" : null; t.sizeRough=false; }
+      t.cagr=gr ? gr.cagr : null; t.cagrEst=gr ? gr.cagrEst : true;
+      t.perf=perfOf(t);
     }
     const sizes=items.map(t=>t.marketUsdB);
     const maxS=Math.max(...sizes), minS=Math.min(...sizes);
     for(const t of items){
       const lg=(Math.log(t.marketUsdB)-Math.log(minS))/Math.max(1e-6,Math.log(maxS)-Math.log(minS));
       t.marketShare=0.08+0.92*lg;
+    }
+    // Performance height: growth a year, linear from 0 to the level's fastest (slope = growth); a sliver for the slowest
+    const maxR=Math.max(1e-6,...items.map(t=>t.perf ? t.perf.r : 0)), sub=w.level==='subthemes';
+    for(const t of items){
+      const lg=Math.max(0,Math.log(Math.max(t.marketUsdB,0.1)/Math.max(minS,0.1)))/Math.max(1e-6,Math.log(Math.max(maxS,0.1)/Math.max(minS,0.1)));
+      t.evidenceSize=t.size; t.evidenceHeight=t.height;
+      // footprint by market size (industries only; markets have no comparable size, so they keep evidence)
+      t.marketFoot = !sub ? 0.16+0.56*lg : t.size;
+      t.perfHeight = (0.05+0.95*Math.max(0,Math.min(1,(t.perf ? t.perf.r : 0)/maxR)))*(sub?0.72:1);
+      const e=easeHill(footP); t.size=t.evidenceSize+(t.marketFoot-t.evidenceSize)*e; t.height=t.evidenceHeight+(t.perfHeight-t.evidenceHeight)*e; setEvRatio(t,e);
     }
   }
 
@@ -387,14 +433,20 @@
     // Hills whose markets carry verdicts of their own. A market without one then reads as unscored;
     // markets of a hill with none (older workspaces) keep inheriting the hill's verdict.
     const scoredHills = new Set(w.items.filter(t=>t.isSubTheme && scores[t.slug]).map(t=>t.parentSlug));
+    // presence on the same log scale as the landscape's heights (applyHeights): one industry the brand
+    // is strongest in doesn't flatten every other one it is present in
+    const lows = Object.values(scores).map(s=>Number(s.presenceNormalised)||0).filter(p=>p>0);
+    const pMin = Math.min(1, ...lows);
+    const scaled = p => p>0 ? 0.12+0.88*(pMin<1 ? 1-Math.log(p)/Math.log(pMin) : 1) : 0;
     for(const t of w.items){
       const brand = scores[t.parentSlug] || {presenceNormalised:0, mentionCount:0};   // presence stays the hill's
       const own = !t.isSubTheme ? brand : scores[t.slug] || (scoredHills.has(t.parentSlug) ? {} : brand);
       const presence = Number(brand.presenceNormalised)||0;
       t.verdict = step==="uniqueness" ? (own.verdict || "unscored") : null;
       t.brandDocs = Number(brand.docs)||0;
+      t.brandStates = {...(brand.states||{}), perceived:Number(brand.perceived)||0};   // perceived is counted apart from states
       t.plays = own.plays || [];
-      t.shrinkR = pack ? 1-presence : 0;
+      t.shrinkR = pack ? 1-scaled(presence) : 0;
       t.presence = presence;
       t.mentionCount = Number(brand.mentionCount)||0;
       t.strength = brand.strength || "none";
@@ -418,6 +470,8 @@
     const centres={};
     industries.forEach((ind,i)=>{ const a=(i/Math.max(1,industries.length))*Math.PI*2-Math.PI/2; centres[ind.slug]={x:Math.cos(a)*0.5,y:Math.sin(a)*0.5}; });
     const nodes=hills.map(t=>{ const c=(!t.emergent && t.industrySlug && centres[t.industrySlug])||{x:0,y:0};
+      const p = SIM && SIM.idx.has(t.slug) ? SIM.pos[SIM.idx.get(t.slug)] : null;
+      if(p) return {...t, x:(p[0]-0.5)*1.4, y:(p[1]-0.5)*1.4};
       return {...t, x:c.x+(hash01(t.slug)-0.5)*0.4, y:c.y+(hash01(t.slug+"z")-0.5)*0.4}; });
     for(let it=0;it<120;it++) for(let a=0;a<nodes.length;a++) for(let b=a+1;b<nodes.length;b++){
       let dx=nodes[b].x-nodes[a].x, dy=nodes[b].y-nodes[a].y; const d=Math.hypot(dx,dy)||1e-6;
@@ -455,6 +509,7 @@
       const url="data/bundle";   // always this server's own data (no URL override)
       const r=await fetch(url,{cache:"no-store"}); if(!r.ok){ const e=new Error(r.status+" "+url); e.status=r.status; throw e; }
       const data=await r.json();
+      [SIM] = await Promise.all([loadSimilarity(data), loadGrowth()]);   // relatedness and places (null keeps the old layout); growth
       readBundle(data);
       // Brand and Uniqueness show faded and can't be opened until a version carries brands
       brandsReady = data.brands.length>0;
@@ -498,8 +553,49 @@
     }
   }
 
+  // ---------- proximity: relatedness (data/similarity, optional) ----------
+  // Relatedness for every pair of industries in two layers: base (semantic, from the base map alone) and, for a
+  // client's map, client (pulled closer where the client's own documents keep discussing two industries together).
+  // Markets are scored only against the other markets of their industry. ?layout=base|client picks the layer
+  // (default: the file's). With no file, or one built for another hierarchy, the page keeps the sector layout.
+  let SIM = null;
+  async function loadSimilarity(data){
+    try{
+      const r=await fetch("data/similarity",{cache:"no-store"});
+      if(!r.ok){ console.info("no relatedness file: the old layout (sector ring)"); return null; }
+      const s=await r.json(), I=s.industries, slugs=data.themes.map(t=>t.slug);
+      const stale = s.version!==2 || !I || I.slugs.length!==slugs.length || slugs.some(x=>!I.slugs.includes(x))
+        || Object.entries(data.subthemes||{}).some(([ind,ms])=>{ const M=(s.markets||{})[ind]; return ms.length>1 && (!M || M.slugs.length!==ms.length || ms.some(m=>!M.slugs.includes(m.slug))); });
+      if(stale){ console.warn("relatedness file was built for another hierarchy: re-score it. Using the old layout."); return null; }
+      const want=new URLSearchParams(location.search).get("layout"), layer = I.layers[want] ? want : s.default;
+      const markets=new Map(), links=new Map();
+      for(const [ind,M] of Object.entries(s.markets)) M.slugs.forEach((x,i)=>markets.set(x,{ind,i,M}));
+      for(const l of s.marketLinks||[]){ links.set(l.a+"|"+l.b,l.score); links.set(l.b+"|"+l.a,l.score); }
+      // default: tallest hills (Normal height) in the middle; ?shape=round: evened into a disc without that pull;
+      // ?shape=related: the plain relatedness layout (keeps the most neighbours together)
+      const shape = new URLSearchParams(location.search).get("shape") || "centre", L=I.layers[layer];
+      const pos = (shape==="round" && L.posRound) || (shape==="centre" && L.posCentre) || L.pos;
+      return {layer, idx:new Map(I.slugs.map((x,i)=>[x,i])), score:L.score, pos, markets, links};
+    }catch(e){ console.warn("relatedness file unreadable: the old layout", e); return null; }
+  }
+  // a pair's relatedness, 0 to 1. Industries: the layer's score. Markets: their own industry's scores, or a
+  // cross-industry link (an arc only, it never moves a hill); 0 for any other pair, so arcs follow real scores
+  function simScore(t,o){
+    if(!SIM) return null;
+    if(t.level!=="subthemes"){ const a=SIM.idx.get(t.slug), b=SIM.idx.get(o.slug); return a==null || b==null ? null : SIM.score[a][b]; }
+    const A=SIM.markets.get(t.slug), B=SIM.markets.get(o.slug);
+    if(A && B && A.ind===B.ind) return A.M.score[A.i][B.i];
+    return SIM.links.get(t.slug+"|"+o.slug) ?? 0;
+  }
+  const indScore=(a,b)=>{ const i=SIM.idx.get(a), j=SIM.idx.get(b); return i==null || j==null ? 0 : SIM.score[i][j]; };
+  // a market's place inside its industry's cluster (unit disc), from its own industry's scores
+  const marketOffset=t=>{ const A=SIM && SIM.markets.get(t.slug); return A ? A.M.offset[A.i] : null; };
+  // sector stays a light pull only (industries)
+  const kinOf=(w,t)=> t.level==="subthemes" ? null : w.items.filter(o=>o!==t && !!t.industrySlug && o.industrySlug===t.industrySlug).map(o=>({id:o.id, score:0.12}));
   // relationships: prefer same GWI industry (sub-themes), then proximity
   function relatedScore(t,o){
+    const sim=simScore(t,o);
+    if(sim!=null) return {id:o.id, score:sim, sameIndustry: t.level==="subthemes" ? t.parentSlug===o.parentSlug : (!!t.industrySlug && t.industrySlug===o.industrySlug)};
     const d=Math.hypot(o.x-t.x,o.z-t.z);
     const sameIndustry = t.level==="subthemes" ? t.parentSlug===o.parentSlug : ((!!t.industrySlug && t.industrySlug===o.industrySlug) || (t.emergent && o.emergent));
     const score=(sameIndustry?0.46:0.24) + 0.42*Math.max(0,1-d/2.6) + (hash01(t.slug<o.slug ? t.slug+o.slug : o.slug+t.slug)-0.5)*0.12;   // fixed jitter: the same pair always scores the same, so the pack (and every contour) is identical on each re-lay
@@ -507,7 +603,8 @@
   }
   function buildMeta(w){
     for(const t of w.items){
-      t.related=w.items.filter(o=>o!==t).map(o=>relatedScore(t,o)).sort((a,b)=>b.score-a.score).slice(0, w.level==="subthemes"?11:6);
+      t.kin = SIM ? kinOf(w,t) : null;
+      t.related=w.items.filter(o=>o!==t).map(o=>relatedScore(t,o)).filter(r=>!SIM || r.score>0.05).sort((a,b)=>b.score-a.score).slice(0, w.level==="subthemes"?11:6);
       t.similarity=+(t.related.reduce((a,r)=>a+r.score,0)/Math.max(1,t.related.length)).toFixed(2);
       if(!t.summary){
         const top=t.related.length ? w.items[t.related[0].id].name : "no other industry";
@@ -537,6 +634,8 @@
 
   // ---------- minimap: the 2-D height image, blended per column exactly like the shader ----------
   const hmBase=new Float32Array(HM*HM), hmShrunk=new Float32Array(HM*HM);
+  const gNum=new Float32Array(HM*HM*4), gDen=new Float32Array(HM*HM), gData=new Float32Array(HM*HM*4);
+  const growthTex=gl.createTexture();
   let introFlat=false;             // the first-load intro holds the terrain flat until it grows it
   // the terrain draws the terrain pane's world (in single views both panes share it)
   const terrainItems=()=>paneA.world.items;
@@ -561,9 +660,10 @@
   }
   function paintHeightmap(tex, scaleOf, peakKey, store){
     hmData.fill(0);
+    const doGrowth = tex===hmTexBase; if(doGrowth){ gNum.fill(0); gDen.fill(0); }
     const pxPerUnit=HM/SPAN, P=4;                        // p-norm: a soft max so hills merge
     for(const t of terrainItems()){
-      const k=scaleOf(t);                               // per-theme multiplier (1 = untouched)
+      const k=scaleOf(t), gE=t.evRatio??1;                               // per-theme multiplier (1 = untouched)
       const cx=((t.x+HALF)/SPAN)*HM, cy=((t.z+HALF)/SPAN)*HM;
       // super-gaussian (exponent 1.5): flatter top and steeper flank, like the original
       // blurred discs; sigma ≈ the theme's footprint so neighbours blend into ridges
@@ -575,11 +675,18 @@
         const dy=y-cy, row=y*HM;
         for(let x=x0;x<=x1;x++){
           const dx=x-cx, g=hgt*Math.exp(-Math.pow((dx*dx+dy*dy)*inv, 1.5));
-          hmData[row+x]+=Math.pow(g,P);
+          const gp=Math.pow(g,P); hmData[row+x]+=gp;
+          if(doGrowth){ gNum[(row+x)*4+1]+=gp*gE; gDen[row+x]+=gp; }
         }
       }
     }
     for(let i=0;i<hmData.length;i++) hmData[i]=Math.pow(hmData[i],1/P);
+    if(doGrowth){
+      for(let i=0;i<gDen.length;i++){ const d=gDen[i], j=i*4; gData[j+1] = d>1e-12 ? gNum[j+1]/d : 1; gData[j+3]=1; }
+      gl.bindTexture(gl.TEXTURE_2D,growthTex);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,HM,HM,0,gl.RGBA,gl.FLOAT,gData);
+      for(const [k,v] of [[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D,k,v);
+    }
     // zero frame so the clamped edge texel is exactly flat
     const F=12;
     for(let y=0;y<HM;y++) for(let x=0;x<HM;x++){
@@ -634,6 +741,7 @@
   let front=Infinity;                               // x of the rolling front; Infinity = idle
   const BAND=1.2, SWEEP_SPEED=18;                   // world units of overshoot, units per second
   function repaintTerrain(){
+    if(!hillPainting) hillEnds = null;   // anything else repainting (brand, level, spread) makes the cached ends stale
     // both extremes are painted once per layout; everything in between is a GPU blend
     paintHeightmap(hmTexBase,   ()=>1,              "peakBase",   hmBase);
     // Ghost contours always reference Industry. hmTexBase may temporarily
@@ -801,6 +909,7 @@
     return 1.0 - min(abs(fract(w - 0.5) - 0.5) / max(fwidth(w), 1e-5) * 1.25, 1.0);
   }
   vec3 ramp(float t){ return texture(uRamp, vec2(clamp(t,0.0,1.0),0.5)).rgb; }
+  uniform sampler2D uGrowth; uniform float uGrowthOn;
   void main(){
     if(uGhost > 0.5){
       if(uDepthOnly > 0.5){ frag = vec4(0.0); return; }
@@ -829,6 +938,10 @@
     // the 2-D pane is a plain floor: no elevation colour and no hillshade, or the hills show through as phantoms
     float t = mix(uFloorT, 1.0, clamp(vH, 0.0, 1.0) * (1.0-uFlat));
     vec3 col = ramp(t);
+    if(uGrowthOn > 0.001){
+      vec4 f = texture(uGrowth, vUv);
+      col = mix(col, ramp(mix(uFloorT, 1.0, clamp(vH*f.g, 0.0, 1.0) * (1.0-uFlat))), uGrowthOn);
+    }
 
     // soft hillshade from a wide heightmap gradient stencil (smooth, not gritty)
     float tx = uTexel;
@@ -901,6 +1014,7 @@
     sweep: gl.getUniformLocation(prog,"uSweep"),
     collapse: gl.getUniformLocation(prog,"uCollapse"),
     undraw: gl.getUniformLocation(prog,"uUndraw"),
+    growth: gl.getUniformLocation(prog,"uGrowth"), growthOn: gl.getUniformLocation(prog,"uGrowthOn"),
   };
 
   // ---------- upload geometry ----------
@@ -1050,6 +1164,7 @@
   function setHover(t){
     if(t===hov) return;
     hov=t;
+    showPerfTip(t);
     const rp=rangePane();
     for(const p of panes){
       const s=inPane(p,t);
@@ -1150,7 +1265,7 @@
   function relationshipPack(items, gap=0.045){
     const n=items.length;
     const area=items.reduce((a,it)=>a+Math.PI*it.r*it.r,0);
-    const S=Math.sqrt(area/(0.78*Math.PI))/3.4;
+    const S=Math.sqrt(area/((SIM ? 0.5 : 0.78)*Math.PI))/3.4, seedK = SIM ? 0.08 : 0.03;
     for(const it of items){ it.x=it.t.x*S; it.z=it.t.z*S; it.sx=it.x; it.sz=it.z; }
     const byId=new Map(items.map(it=>[it.t.id,it]));
     const collide=k=>{
@@ -1163,8 +1278,8 @@
     };
     for(let it=0; it<300; it++){
       for(const c of items){
-        c.x+=(c.sx-c.x)*0.03; c.z+=(c.sz-c.z)*0.03;
-        for(const r of c.t.related){
+        c.x+=(c.sx-c.x)*seedK; c.z+=(c.sz-c.z)*seedK;
+        for(const r of (c.t.kin ? c.t.related.concat(c.t.kin) : c.t.related)){
           const o=byId.get(r.id); if(!o) continue;
           const dx=o.x-c.x, dz=o.z-c.z, d=Math.hypot(dx,dz)||1e-6, rest=c.r+o.r+gap;
           if(d>rest){ const f=(d-rest)/d*0.006*r.score; c.x+=dx*f; c.z+=dz*f; }
@@ -1190,7 +1305,9 @@
   function packTerrainLayout(w){
     const packed=relationshipPack(w.items.map(t=>({t,r:bubbleR0(t)})));
     const ext=Math.max(...packed.map(q=>Math.max(Math.abs(q.x),Math.abs(q.z))), 1e-6);
-    const S=3.4/ext;
+    const reach=t=>2*0.95*Math.max(spreadMul,1.2)*Math.max(t.size, t.evidenceSize??0, t.marketFoot??0);
+    const fit=Math.max(...packed.map(q=>(Math.max(Math.abs(q.x),Math.abs(q.z))*3.4/ext + reach(q.t))/(HALF-0.1)), 1);
+    const S = SIM ? 3.4/ext/fit : 3.4/ext;   // relatedness layouts only; the old layout is left as it was
     for(const q of packed){ q.t.x=q.t.bx=q.x*S; q.t.z=q.t.bz=q.z*S; }
   }
 
@@ -1205,7 +1322,9 @@
       return {id:i, slug, members, title:m0.parentTitle, sector:m0.emergent?"__emergent":m0.industrySlug,
         x:m0.x, z:m0.z, related:[], r:Math.max(0.2, Math.sqrt(members.reduce((a,t)=>a+rOf(t)*rOf(t),0))*1.3)};
     });
-    for(const g of proxies) g.related=proxies.filter(o=>o!==g && o.sector===g.sector).map(o=>({id:o.id, score:0.5}));
+    for(const g of proxies) g.related = SIM
+      ? proxies.filter(o=>o!==g).map(o=>({id:o.id, score:indScore(g.slug,o.slug)})).sort((a,b)=>b.score-a.score).slice(0,6)
+      : proxies.filter(o=>o!==g && o.sector===g.sector).map(o=>({id:o.id, score:0.5}));
     const packed=relationshipPack(proxies.map(g=>({t:g, r:g.r})), 0.22);
     const ext=Math.max(...packed.map(q=>Math.max(Math.abs(q.x)+q.r, Math.abs(q.z)+q.r)), 1e-6);
     const S=Math.min(1, 4.3/ext);
@@ -1213,7 +1332,7 @@
     for(const q of packed){
       const g=q.t, cx=q.x*S, cz=q.z*S;
       const order=[...g.members].sort((a,b)=>b.excerpts-a.excerpts);
-      order.forEach((t,j)=>{ const a=j*2.39996+hash01(g.slug)*6.28, d=rOf(t)*1.6*Math.sqrt(j)*S; t.x=cx+Math.cos(a)*d; t.z=cz+Math.sin(a)*d; if(S<1){ t.size*=S; t.height*=Math.max(0.45,S); } });   // footprint and height shrink together, or peaks turn to needles
+      order.forEach((t,j)=>{ const off=marketOffset(t), a=j*2.39996+hash01(g.slug)*6.28, d=rOf(t)*1.6*Math.sqrt(j)*S; if(off && order.length>1){ t.x=cx+off[0]*g.r*S*0.7; t.z=cz+off[1]*g.r*S*0.7; } else { t.x=cx+Math.cos(a)*d; t.z=cz+Math.sin(a)*d; } if(S<1){ t.size*=S; t.height*=Math.max(0.45,S); } });   // footprint and height shrink together, or peaks turn to needles
       for(let it=0;it<60;it++){
         for(let a=0;a<order.length;a++){
           order[a].x+=(cx-order[a].x)*0.02; order[a].z+=(cz-order[a].z)*0.02;
@@ -1352,16 +1471,16 @@
   /** Show the theme's evidence in the panel; `focus` (a topic's key) opens that topic and brings it into view. */
   async function loadEvidence(themeId, focus){
     evidenceFor=themeId;
-    const box=document.getElementById("pEvidence"), meta=document.getElementById("pEvidenceMeta"), body=document.getElementById("pEvidenceBody");
+    const box=document.getElementById("pEvidence"), body=document.getElementById("pEvidenceBody");
     box.hidden=false;
     let data=evidenceCache.get(themeId);
     if(!data){
-      meta.textContent=""; body.innerHTML=""; document.getElementById("pEvidenceCount").textContent="";
+      body.innerHTML="";
       const note=document.createElement("p"); note.className="ev-note"; note.textContent="Loading…"; body.appendChild(note);
       try{
         const u=new URL(evidenceUrl); u.searchParams.set("theme",themeId);
         const r=await fetch(u,{cache:"no-store"}); if(!r.ok){ const e=new Error(String(r.status)); e.status=r.status; throw e; }
-        data=await r.json(); evidenceCache.set(themeId,data);
+        data=cleanSummaries(await r.json()); evidenceCache.set(themeId,data);
       }catch(e){
         if(evidenceFor===themeId) note.textContent = e?.status===410 ? UPDATED : "These documents couldn't load. Reload the page to try again.";
         return;
@@ -1372,10 +1491,8 @@
   }
   const plural=(n,one,many)=>`${n} ${n===1?one:many}`;
   function renderEvidence(data,themeId,focus){
-    const meta=document.getElementById("pEvidenceMeta"), body=document.getElementById("pEvidenceBody");
+    const body=document.getElementById("pEvidenceBody");
     hoverTopic=null;
-    document.getElementById("pEvidenceCount").textContent=String(data.topics.filter(t=>t.key!=="general").length);   // prototype: markets only
-    meta.textContent=`${plural(data.excerptCount,"excerpt","excerpts")} · ${plural(data.documentCount,"document","documents")}`;
     // the headline counts the same excerpts: the theme's, or the one topic's when a topic is what's selected
     const focused=data.topics.find(t=>t.key===focus);
     if(sel && sel.isSubTheme){
@@ -1383,8 +1500,7 @@
       const at=li=>rank.get(sel.w.bySlug.get(li.dataset.slug)?.subKey) ?? Infinity;
       list.append(...[...list.children].sort((a,b)=>at(a)-at(b)));
     }
-    const kpi=document.getElementById("pKpiExcerpts");
-    if(kpi){ kpi.textContent=String(sel && sel.isSubTheme ? (focused ? focused.excerpts.length : 0) : data.excerptCount); /* a sub-theme with no documents has no excerpts either */ fitFigure(kpi); }
+    fillDocKpis(sel && sel.isSubTheme ? focus : themeId);
     body.innerHTML="";
     const peak = sel && sel.isSubTheme ? focus : themeId;
     renderDocCards(body, docsData?.peaks[peak] || [], {
@@ -1394,18 +1510,100 @@
       hasGeneral: data.topics.some(t=>t.key==="general"),
     });
     const docRows=docsData?.peaks[peak]||[], adding=docRows.filter(r=>r.adds>0).length;
-    document.getElementById("pEvidenceCount").textContent=String(docRows.length);
-    meta.textContent=`${adding} add height${docRows.length>adding?` · ${docRows.length-adding} mention it in passing`:""} · height ${fmtH(heightOf(peak))}`;
   }
 
   // ---------- documents: every document once (library) and the documents behind each peak ----------
   let docsData=null;
-  // Published files call a licensed document "licensed"; the build's own files call it "internal".
-  const withLicensed=d=>{ for(const doc of Object.values((d&&d.docs)||{})) if("licensed" in doc) doc.internal=doc.licensed; return d; };
+  /** Drop the extraction's "Unconfirmed:" flag from every summary in a payload (in place), capitalising what follows. */
+  function cleanSummaries(x){
+    if(Array.isArray(x)) x.forEach(cleanSummaries);
+    else if(x && typeof x==='object') for(const k in x){ const v=x[k];
+      if(k==='summary' && typeof v==='string' && /^Unconfirmed:\s*/.test(v)){ const t=v.replace(/^Unconfirmed:\s*/,''); x[k]=t.charAt(0).toUpperCase()+t.slice(1); }
+      else if(v && typeof v==='object') cleanSummaries(v); }
+    return x;
+  }
+  // the counts the Documents section shows, for the top boxes: documents (and how many add height), excerpts
+  // (and how many come from documents that only mention the peak in passing)
+  const peakKey = t => t.isSubTheme ? t.subKey : t.slug;
+  function peakCounts(key){
+    const rows = docsData?.peaks?.[key]; if(!rows) return null;
+    const add = rows.filter(r=>r.adds>0), ex = rows.reduce((a,r)=>a+(r.excerptCount||0),0), exAdd = add.reduce((a,r)=>a+(r.excerptCount||0),0);
+    return {docs:rows.length, adding:add.length, ex, exPassing:ex-exAdd};
+  }
+  // brand presence detail (data/presence, optional): counts and document kinds per hill; a missing file = no lines
+  let presenceData=null;
+  function loadPresence(){
+    return fetch(new URL("data/presence", location.href),{cache:"no-store"}).then(r=>r.ok?r.json():null).catch(()=>null)
+      .then(d=>{ presenceData = d && typeof d==="object" && d.hills && typeof d.hills==="object" ? d : null; if(sel && step==='brand') renderFigures(sel); });
+  }
+  loadPresence();
+  const brandName = () => verdictData?.brands?.[subset]?.title || "the brand";
+  const BRAND_STATES=[["sells","Sells",0.9],["explores","Explores",0.62],["perceived","Seen as",0.4],["studies","Researches",0.2]];   // one muted family
+  function brandCard(t, c, el, big){
+    const P=presenceData?.hills?.[peakKey(t)];
+    const st = P?.states || t.brandStates || {};
+    const own = t.isSubTheme && P;   // a market reads its own counts; the presence share stays its industry's
+    if(t.mentionCount){ const b=el('b','fig-big',`${t.strength[0].toUpperCase()+t.strength.slice(1)} \u2022 ${Math.round(t.presence*100) || '<1'}%`); big.push(b); c.append(b); }
+    else c.append(el('div','fig-none','No presence yet'));
+    const tint=a=>`color-mix(in srgb, var(--ink) ${Math.round(a*100)}%, transparent)`;
+    const parts=BRAND_STATES.filter(([k])=>st[k]>0);
+    if(parts.length){
+      const bar=el('div','pres-bar'); bar.title=`How ${brandName()} shows up here, by finding`;
+      for(const [k,lbl,a] of parts){ const seg=el('i'); seg.style.flexGrow=st[k]; seg.style.background=tint(a); seg.title=`${lbl}: ${st[k]}`; bar.append(seg); }
+      const leg=el('div','fig-note pres-legend');
+      for(const [k,lbl,a] of parts){ const it=el('span'); const dot=el('i'); dot.style.background=tint(a); it.append(dot, `${lbl} `, el('b',null,String(st[k]))); leg.append(it); }
+      c.append(bar, leg);
+    }
+    if(P && P.types && Object.keys(P.types).length){   // the kinds of documents, most first, other last
+      const G=Object.fromEntries((presenceData.groups||[]).map(g=>[g.key,g])), cap1=w=>w.charAt(0).toUpperCase()+w.slice(1);
+      const kinds=el('div','fig-note pres-kinds');
+      for(const [k,n] of Object.entries(P.types).sort((x,y)=>(x[0]==='other')-(y[0]==='other') || y[1]-x[1])){
+        const it=el('span'); it.append(el('b',null,String(n)), ' '+cap1(n===1?(G[k]?.one||k):(G[k]?.many||k))); kinds.append(it);
+      }
+      c.append(kinds);
+    }
+  }
+  function renderFigures(t){
+    const box=document.getElementById('pKpis'); box.className='figs'; box.innerHTML='';
+    const el=(tag,cls,txt)=>{ const e=document.createElement(tag); if(cls) e.className=cls; if(txt!=null) e.textContent=txt; return e; };
+    const card=(label,title,into=box)=>{ const c=el('div','fig-card'); if(title) c.title=title; c.append(el('div','fig-lbl',label)); into.append(c); return c; };
+    const big=[];
+    // the same in Normal and Performance: market size, growth, leaders; then the evidence
+    if(!t.isSubTheme && !t.emergent){
+      const c=card('Market size','Market size, 2024');
+      if(t.sizeLabel){ const b=el('b','fig-big',t.sizeLabel); big.push(b); c.append(b); if(t.sizeRough) c.append(el('div','fig-note','estimate')); }
+      else c.append(el('div','fig-none','not sized yet'));
+    }
+    if(t.perf){ const c=card('Growth a year','Growth a year, 2019–24'); const b=el('b','fig-big',t.perf.r.toFixed(1)+'%'); big.push(b); c.append(b, growthBar(t.perf)); }
+    const leaders = !t.isSubTheme && LEADERS[t.slug];
+    if(leaders && leaders.length) card('Leading companies').append(el('div','fig-names',leaders.join(' \u2022 ')));
+    // Brand: one card for presence and its evidence, at the top (no 'Quoted from': the documents list shows them)
+    document.getElementById('pEvidenceBrand').innerHTML='';
+    if(step==='brand'){
+      const c=card('Brand presence','How present the brand is here, from its own documents', document.getElementById('pEvidenceBrand'));   // first card of Evidence
+      brandCard(t, c, el, big);   // presence share, how the brand shows up, and the kinds of documents behind it
+    }
+    const ev=document.getElementById('pEvidenceKpis'); ev.innerHTML='';   // the Evidence cards sit at the top of the Documents section
+    const c=peakCounts(peakKey(t));
+    for(const [id,label,title,v] of [
+      ['pKpiDocs','Documents','Every document with an excerpt here; those that are more than a passing mention add height to the hill', c?.docs ?? t.signalDocs],
+      ['pKpiExcerpts','Excerpts','Every verbatim excerpt from those documents, passing mentions included', c?.ex ?? (t.isSubTheme ? '…' : t.excerptTotal)]]){
+      const k=card(label,title,ev); const b=el('b','fig-big',String(v)); b.id=id; big.push(b); const n=el('div','fig-note'); n.id=id+'Sub'; k.append(b,n);
+    }
+    big.forEach(fitFigure); fitRanges(box); fillDocKpis(peakKey(t));
+  }
+  function fillDocKpis(key){
+    const c = peakCounts(key) || {docs:0, adding:0, ex:0, exPassing:0};
+    const set=(id,v)=>{ const b=document.getElementById(id); if(b){ b.textContent=String(v); fitFigure(b); } };
+    set('pKpiDocs', c.docs); set('pKpiExcerpts', c.ex);
+    const ds=document.getElementById('pKpiDocsSub'), es=document.getElementById('pKpiExcerptsSub');
+    if(ds) ds.textContent = c.docs ? (c.adding===c.docs ? 'all add height' : `${c.adding} ${c.adding===1 ? 'adds' : 'add'} height`) : '';
+    if(es) es.textContent = !c.exPassing ? '' : c.exPassing===c.ex ? 'all in passing' : `${c.exPassing} in passing`;
+  }
   let docsUpdated=false;   // the portal answers 410 once this version is no longer live (UPDATED)
-  const docsReady=fetch(new URL("data/docs", location.href),{cache:"no-store"}).then(r=>{ docsUpdated=r.status===410; return r.ok?r.json():null; }).then(d=>{docsData=withLicensed(d); return docsData;}).catch(()=>null);
+  const docsReady=fetch(new URL("data/docs", location.href),{cache:"no-store"}).then(r=>{ docsUpdated=r.status===410; return r.ok?r.json():null; }).then(d=>{docsData=cleanSummaries(d); return docsData;}).catch(()=>null);
   const fmtH=h=>h==null?"—":(Math.round(h*10)/10).toString();
-  const GRADE={keep:["Strong","A strong source: counts in full"],weak:["Weak","A weak source: counts at half weight"],drop:["Not used","Not used: adds no height"]};
+  const GRADE={keep:["Strong","A strong source: counts in full"],weak:["Weak","A weak source: counts at half weight"],drop:["Not used","Used for context only: adds no height"]};
   const heightOf=slug=>docsData?.heights[slug] ?? null;
   const itemFor=slug=>world("themes").bySlug.get(slug) || null;   // an industry's peak (the library links to industries)
   const initials=s=>s.replace(/\(.*?\)/g,"").split(/[\s&,/-]+/).filter(w=>/^[A-Z0-9]/.test(w)).slice(0,3).map(w=>w[0]).join("") || s.slice(0,2);
@@ -1413,8 +1611,8 @@
     const c=document.createElement("div"); c.className="doc-cover";
     if(safeImg(d.cover)){ const img=document.createElement("img"); img.src=safeImg(d.cover); img.alt=""; img.loading="lazy"; c.appendChild(img); return c; }
     c.classList.add("blank");
-    const b=document.createElement("b"); b.textContent=d.internal?"—":initials(d.publisher);
-    const k=document.createElement("span"); k.textContent=d.internal?"licensed":d.kind.replace("-"," ");
+    const b=document.createElement("b"); b.textContent=initials(d.publisher);
+    const k=document.createElement("span"); k.textContent=d.kind.replace("-"," ");
     c.append(b,k); return c;
   }
   /** One document as a card. `row` is its line in a peak (what it adds there), or null in the library. */
@@ -1427,9 +1625,9 @@
     const hb=document.createElement("button"); hb.type="button"; hb.textContent=title; hb.addEventListener("click",()=>openDocument(id)); h.appendChild(hb);
     const by=document.createElement("div"); by.className="doc-by";
     const pub=document.createElement("span"); pub.className="pub"; pub.textContent=[d.publisher,d.year].filter(Boolean).join(" · "); pub.title=d.publisher;
-    const g=document.createElement("span"); g.className="grade "+(d.internal?"internal":d.grade);
-    const [gl,gt]=d.internal?["Licensed","Licensed: summary only, no cover or excerpts"]:GRADE[d.grade]||[d.grade,""];
-    g.textContent=gl; g.title=gt+(d.gradeReason?". "+d.gradeReason:"");
+    const g=document.createElement("span"); g.className="grade g-"+d.grade;
+    const [gl,gt]=GRADE[d.grade]||[d.grade,""];
+    g.textContent=gl; g.title=gt;
     by.append(pub,g);
     body.append(h,by);
     if(d.summary){ const s=document.createElement("p"); s.className="doc-sum"; s.textContent=d.summary; s.title=d.summary; body.appendChild(s); }
@@ -1438,12 +1636,12 @@
       const lbl=document.createElement("span");
       if(row.adds>0){
         const bar=document.createElement("div"); bar.className="bar"; const i=document.createElement("i"); i.style.width=Math.max(2,Math.round(row.share*100))+"%"; bar.appendChild(i);
-        lbl.textContent=`adds ${Math.round(row.share*100)}% · +${fmtH(row.adds)}`;
-        lbl.title=`Adds ${row.adds.toFixed(2)} of this peak's height`;
+        lbl.textContent=`adds ${Math.round(row.share*100)}%`;
+        lbl.title=`Adds ${Math.round(row.share*100)}% of this hill's height`;
         a.append(bar,lbl);
       } else {
         a.classList.add("none");
-        lbl.textContent = d.grade==="drop" ? "adds no height: not used" : "adds no height: passing mentions only";
+        lbl.textContent = d.grade==="drop" ? "adds no height: context only" : "adds no height: passing mentions only";
         a.appendChild(lbl);
       }
       body.appendChild(a);
@@ -1476,8 +1674,6 @@
       }
       t.addEventListener("click",()=>{ const o=quotes.hidden; quotes.hidden=!o; t.setAttribute("aria-expanded",o?"true":"false"); });
       foot.appendChild(t);
-    } else if(row && d.internal && row.excerptCount){
-      const s=document.createElement("span"); s.className="ev-note"; s.style.fontSize="10px"; s.textContent=`${plural(row.excerptCount,"excerpt","excerpts")}, licensed: not shown`; foot.appendChild(s);
     }
     if(safeHref(d.url)){ const l=document.createElement("a"); l.href=safeHref(d.url); l.target="_blank"; l.rel="noopener noreferrer"; l.textContent="Source ↗"; foot.appendChild(l); }
     if(foot.children.length) body.appendChild(foot);
@@ -1555,7 +1751,7 @@
           .filter(({e})=>filter==null || (filter==="general" ? !e.market : e.market===titleOf.get(filter)))
           .sort((a,b)=>docSort==="recent" ? year(b.doc)-year(a.doc) || b.e.salience-a.e.salience : (b.e.counts-a.e.counts) || b.e.salience-a.e.salience || b.adds-a.adds);
         fillMasonry(list, ex.map(({e,doc})=>quoteCard(e,{doc})));
-        if(!ex.length){ list.className=""; const p=document.createElement("p"); p.className="ev-note"; p.textContent="Licensed sources only: summaries, no excerpts."; list.appendChild(p); }
+        if(!ex.length){ list.className=""; const p=document.createElement("p"); p.className="ev-note"; p.textContent="No excerpts to show."; list.appendChild(p); }
       } else {
         list.className="doc-list";
         for(const r of shown) list.appendChild(docCard(r.doc, r, {showMarket:!!markets && filter==null}));
@@ -1590,17 +1786,17 @@
     if(safeImg(d.cover)){ const img=document.createElement("img"); img.src=safeImg(d.cover); img.alt=""; img.loading="lazy"; t.appendChild(img); }
     else {
       const art=document.createElement("div"); art.className="tile-art";
-      const b=document.createElement("b"); b.textContent=d.internal?"—":initials(d.publisher);
-      const k=document.createElement("span"); k.textContent=d.internal?"licensed":d.kind.replace("-"," ");
+      const b=document.createElement("b"); b.textContent=initials(d.publisher);
+      const k=document.createElement("span"); k.textContent=d.kind.replace("-"," ");
       art.append(b,k); t.appendChild(art);
     }
     const body=document.createElement("div"); body.className="tile-body";
     const h=document.createElement("h4"); h.className="tile-title"; h.textContent=title;
     const by=document.createElement("div"); by.className="tile-by"; by.textContent=[d.publisher,d.year].filter(Boolean).join(" · ");
     const foot=document.createElement("div"); foot.className="tile-foot";
-    const g=document.createElement("span"); g.className="grade "+(d.internal?"internal":d.grade);
-    const [gl,gt]=d.internal?["Licensed","Licensed: summary only"]:GRADE[d.grade]||[d.grade,""]; g.textContent=gl; g.title=gt;
-    const n=document.createElement("span"); n.textContent = total>0 ? `+${fmtH(total)} height` : "context only";
+    const g=document.createElement("span"); g.className="grade g-"+d.grade;
+    const [gl,gt]=GRADE[d.grade]||[d.grade,""]; g.textContent=gl; g.title=gt;
+    const n=document.createElement("span"); n.textContent = total>0 ? "adds height" : "context only";
     foot.append(g,n);
     body.append(h,by,foot); t.appendChild(body);
     t.addEventListener("click",()=>openDocument(id));
@@ -1660,14 +1856,14 @@
 
     const hero=el("header","doc-hero"+(safeImg(d.cover)?"":" blank"));
     if(safeImg(d.cover)){ const img=el("img"); img.src=safeImg(d.cover); img.alt=""; hero.appendChild(img); }
-    else { const art=el("div","art"); art.append(el("b",null,d.internal?"—":initials(d.publisher)), el("span",null,d.internal?"licensed":d.kind.replace("-"," "))); hero.appendChild(art); }
+    else { const art=el("div","art"); art.append(el("b",null,initials(d.publisher)), el("span",null,d.kind.replace("-"," "))); hero.appendChild(art); }
     const nav=el("div","doc-nav");
     if(docFrom){ const back=el("button",null,"‹"); back.type="button"; back.setAttribute("aria-label", docFrom==="library"?"Back to the library":`Back to ${sel.name}`); back.title=back.getAttribute("aria-label"); back.addEventListener("click",backFromDocument); nav.appendChild(back); }
     else nav.appendChild(el("span","spacer"));
     const close=el("button",null,"×"); close.type="button"; close.setAttribute("aria-label","Close panel"); close.addEventListener("click",()=>select(null)); nav.appendChild(close);
     const chip=el("span","chip"); chip.append("Document");
     const by=el("div","doc-by");
-    const g=el("span","grade "+(d.internal?"internal":d.grade)); const [gl,gt]=d.internal?["Licensed","Licensed: summary only, no cover or excerpts"]:GRADE[d.grade]||[d.grade,""]; g.textContent=gl; g.title=gt;
+    const g=el("span","grade g-"+d.grade); const [gl,gt]=GRADE[d.grade]||[d.grade,""]; g.textContent=gl; g.title=gt;
     by.append(el("span","pub",[d.publisher,d.year].filter(Boolean).join(" · ")), g);
     hero.append(nav, chip, el("h2",null,title), by);
     box.appendChild(hero);
@@ -1675,7 +1871,7 @@
     const lede=el("div","doc-lede");
     if(d.summary) lede.appendChild(el("p","summary",d.summary));
     const facts=el("dl","stats");
-    for(const [k,v] of [["Kind",d.kind.replace("-"," ")],["Where",d.geography],["Sample",d.sample],["Grade",d.gradeReason]]){
+    for(const [k,v] of [["Kind",d.kind.replace("-"," ")],["Where",d.geography],["Sample",d.sample]]){
       if(!v) continue;
       const row=el("div",String(v).length>16?"wide":null); row.append(el("dt",null,k), el("dd",null,v)); facts.appendChild(row);
     }
@@ -1690,12 +1886,12 @@
     if(shaping.length){
       const chips=el("div","doc-peaks big");
       for(const x of shaping){
-        const b=el("button","doc-chip"); b.type="button"; b.append(x.item.name); b.appendChild(el("span","n","+"+fmtH(x.row.adds)));
-        b.title=`Adds ${x.row.adds.toFixed(2)} of ${x.item.name}'s height (${Math.round(x.row.share*100)}%)`;
+        const b=el("button","doc-chip"); b.type="button"; b.append(x.item.name); b.appendChild(el("span","n",Math.round(x.row.share*100)+"%"));
+        b.title=`Adds ${Math.round(x.row.share*100)}% of ${x.item.name}'s height`;
         b.addEventListener("click",()=>select(x.item)); chips.appendChild(b);
       }
       s1.appendChild(chips);
-    } else s1.appendChild(el("p","ev-note", d.grade==="drop" ? "Not used, so it adds no height anywhere." : "Context only: it adds no height to any industry."));
+    } else s1.appendChild(el("p","ev-note", d.grade==="drop" ? "Used for context only, so it adds no height anywhere." : "Context only: it adds no height to any industry."));
     box.appendChild(s1);
 
     const ex=inds.flatMap(x=>x.row.excerpts.map(e=>({e,x})));
@@ -1706,7 +1902,7 @@
       box.appendChild(s2);
       fillMasonry(grid, ex.sort((a,b)=>(b.e.counts-a.e.counts) || b.e.salience-a.e.salience)
         .map(({e,x})=>quoteCard(e,{tag:e.market||x.item.name, onTag:()=>select(x.item)})));
-    } else s2.appendChild(el("p","ev-note", d.internal ? "Licensed source: summary only, so excerpts aren't shown." : "No excerpts placed on the map."));
+    } else s2.appendChild(el("p","ev-note", "No excerpts placed on the map."));
     box.appendChild(s2);
 
     lightPeaks(new Set(shaping.map(x=>x.slug)), new Set(Object.entries(docsData.peaks).filter(([slug,rs])=>!itemFor(slug) && rs.some(r=>r.doc===id && r.adds>0)).map(([slug])=>slug)));
@@ -1923,6 +2119,7 @@
     if(!s) return null;
     if(s.cluster) return s.cluster.length ? s.cluster : null;
     const t=s.item, W=p.world;
+    if(!s.parent){ const lit=t.related.map(r=>W.items[r.id]).filter(Boolean); if(lit.length) return [t, ...lit]; }   // the hill and its lines' ends
     const group=W.items.filter(o=>o===t || (W.level==="subthemes" ? o.parentSlug===t.parentSlug : ((!t.emergent && o.industrySlug && o.industrySlug===t.industrySlug) || (t.emergent && o.emergent))));
     return group.length>1 ? group : [t, ...t.related.map(r=>W.items[r.id])];
   }
@@ -1954,43 +2151,18 @@
     const showHook=step==="brand" && t.snippet;
     pHook.hidden=!showHook;
     pHook.textContent=showHook ? t.snippet : "";
-    const kpis=[
-      [t.signalDocs, "Documents", "Documents that put a market on this industry"],
-      [t.isSubTheme ? "…" : t.excerptTotal, "Excerpts", "Verbatim excerpts behind those markets"],
-      [t.relevance==null ? "—" : Math.round(t.relevance*100)+"%", "Relevance",
-        t.relevance!=null ? "How well the industry fits the brief" : t.isSubTheme ? "Relevance is scored per industry, not per market" : "Built without a brief, so not scored"],
-    ];
-    const pKpis=document.getElementById("pKpis"); pKpis.innerHTML="";
-    for(const [v,label,title] of kpis){
-      const cell=document.createElement("div"); cell.title=title;
-      const b=document.createElement("b"); b.textContent=String(v); if(label==="Excerpts") b.id="pKpiExcerpts";
-      const l=document.createElement("span"); l.textContent=label;
-      cell.append(b,l); pKpis.appendChild(cell); fitFigure(b);
-    }
+    renderFigures(t);
     pStats.innerHTML="";
     const rows=[];
     if(t.isSubTheme) rows.push(["Part of", t.parentTitle]);
-    rows.push(["Height", fmtH(t.signalMentions)]);
-    if(!t.emergent && t.nodeMarketUsdB!=null){
-      rows.push(["Market size", "$"+t.nodeMarketUsdB+"B"]);
-      if(t.cagr!=null) rows.push(["Growth 2019–24", (t.cagr*100).toFixed(1)+"% a year"]);
-      rows.push(["$ source", t.marketSource]);
-      if(t.industryMarketSizeUsdB!=null && t.industryMarketSizeUsdB!==t.nodeMarketUsdB) rows.push(["Sector $", "$"+t.industryMarketSizeUsdB+"B"]);
-    }
     if(t.mergedFrom) rows.push(["Merged in", t.mergedFrom.join(", ")]);
-    if(t.noSignal) rows.push(["Documents", "none yet — a research gap"]);
-    if(step==="brand"){
-      rows.push(["Brand presence", t.mentionCount ? `${t.strength[0].toUpperCase()+t.strength.slice(1)} · ${Math.round(t.presence*100)}%` : "Absent"]);
-      rows.push(["Brand evidence", t.mentionCount ? `${t.mentionCount} mentions · ${t.brandDocs} brand documents` : "none in the brand's documents"]);
-      if(t.hookSource) rows.push(["Quoted from", t.hookSource]);
-    }
     if(t.emergent && t.phrases) rows.push(["Recurring phrases", t.phrases.slice(0,6).join(" · ")]);
     for(const [k,v] of rows){                       // the facts under the headline figures (lost in the port from the prototype)
       if(v==null || v==="") continue;
       const d=document.createElement("div");
       if(String(v).length>16) d.className="wide";   // long text (documents, phrases) takes the full width
       const dt=document.createElement("dt"); dt.textContent=k;
-      const dd=document.createElement("dd"); dd.textContent=v;
+      const dd=document.createElement("dd"); if(v instanceof Node){ dd.appendChild(v); d.className="wide"; } else dd.textContent=v;
       d.append(dt,dd); pStats.appendChild(d);
     }
     pStats.hidden=!pStats.children.length;
@@ -2027,11 +2199,16 @@
       ? items.filter(o=>o!==t && o.isSubTheme && o.parentSlug===t.parentSlug).map(o=>relatedScore(t,o))
           .sort((a,b)=>items[b.id].signalDocs-items[a.id].signalDocs || items[b.id].frequency-items[a.id].frequency || items[a.id].name.localeCompare(items[b.id].name))
       : t.related;
-    document.getElementById("pRelatedTip").textContent = siblings
-      ? "The other markets of the same industry, in the order of the list above. Scores run from 0 to 1: how close each sits to this one on the map."
-      : "Ranked by how close they sit on the map, with extra weight for "
+    document.getElementById("pRelatedTip").textContent = SIM
+      ? (siblings ? "The other markets of the same industry, in the order of the list above. Relatedness runs from 0 to 1: how close the two are in meaning, from their definitions."
+                  : "Ranked by relatedness: how close the two industries are in meaning, from their definitions"
+                    + (SIM.layer==="client" ? ", pulled closer where the client's own documents keep discussing both" : "")
+                    + ". Relatedness runs from 0 to 1. Hills sit near the industries they are most related to.")
+      : siblings
+      ? "The other markets of the same industry, in the order of the list above. Relatedness runs from 0 to 1: how close each sits to this one on the map."
+      : "Ranked by relatedness: how close they sit on the map, with extra weight for "
         + (sub ? "markets of the same industry." : t.emergent ? "other emergent industries." : "industries in the same sector.")
-        + " Scores run from 0 to 1.";
+        + " Relatedness runs from 0 to 1.";
     const relRows = rel.map(r=>{ const o=items[r.id]; return {item:o, name:o.name, emergent:o.emergent, score:r.score}; });
     document.getElementById("pRelatedSec").hidden = !relRows.length;
     document.getElementById("pRelatedCount").textContent = String(relRows.length);
@@ -2047,7 +2224,7 @@
       n.append(mk,nm);
       const bar=document.createElement("span"); bar.className="bar";
       const fill=document.createElement("i"); fill.style.width=Math.round(o.score*100)+"%"; bar.appendChild(fill);
-      const v=document.createElement("span"); v.className="rv"; v.textContent=o.score.toFixed(2);
+      const v=document.createElement("span"); v.className="rv"; v.textContent=o.score.toFixed(2); v.title="Relatedness, 0 to 1";
       b.append(n,bar,v); b.addEventListener("click",()=>select(o.item));
       li.appendChild(b); pRelated.appendChild(li);
     }
@@ -2062,20 +2239,57 @@
     if(!items.length) return;
     const c=p.cam, flat=p.mode==="2d";
     const pts=items.map(t=>{ const [x,z]=posOf(p,t); return [x, flat?0:(t.peak??0)+0.05, z]; });
+    // each hill's ground footprint as four points round its base: the bubble in 2-D, else the hill's visible
+    // spread (about 1.6 sigma of its current width, which follows Normal or Performance)
+    const footR=t=> flat ? bubbleR(t) : 1.6*0.95*spreadMul*t.size;
+    const ring=[]; for(const t of items){ const [x,z]=posOf(p,t), r=footR(t); ring.push([x+r,0,z],[x-r,0,z],[x,0,z+r],[x,0,z-r]); }
     let cx=0,cy=0,cz=0; for(const q of pts){ cx+=q[0]; cy+=q[1]; cz+=q[2]; } cx/=pts.length; cy/=pts.length; cz/=pts.length;
     // the look-at point IS the group's 3-D centroid, so orbiting (auto or by hand) pivots on it
     c.centerTarget=[cx,cy,cz];
     const phi=Math.max(0.02,c.phiTarget), sp=Math.sin(phi), cp=Math.cos(phi);
     const eye=[cx+R*sp*Math.sin(c.theta), cy+R*cp, cz+R*sp*Math.cos(c.theta)];
     const view=lookAt(eye,[cx,cy,cz],[0,1,0]);
-    let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
-    for(const q of pts){ const v=transform(view,q);
-      x0=Math.min(x0,v[0]); x1=Math.max(x1,v[0]); y0=Math.min(y0,v[1]); y1=Math.max(y1,v[1]); }
-    const bw=Math.max(0.05,x1-x0), bh=Math.max(0.05,y1-y0);
+    // the lines' tops: each arc rises 0.35 + 0.22 x its length above the middle of its two ends (buildArcs)
+    const [ax,az]=posOf(p,items[0]);
+    if(!flat) for(const o of items.slice(1)){ const [ox,oz]=posOf(p,o), d=Math.hypot(ox-ax,oz-az);
+      ring.push([(ax+ox)/2, ((items[0].peak??0)+(o.peak??0))/2+0.05+0.35+0.22*d, (az+oz)/2]); }
+    const vs=pts.concat(ring).map(q=>transform(view,q));
+    const x0=Math.min(...vs.map(v=>v[0])), x1=Math.max(...vs.map(v=>v[0])), y0=Math.min(...vs.map(v=>v[1])), y1=Math.max(...vs.map(v=>v[1]));
+    const MIN_BOX=2.6;                                     // about a mid-sized hill and a neighbour: a lone small hill frames no closer
+    const bw=Math.max(MIN_BOX,x1-x0), bh=Math.max(MIN_BOX*0.6,y1-y0);
     const Wv=settledWidth(p), H=Math.max(1,p.rect[3]);
-    const FILL=0.48, PAD=48;                                 // frame the group at ~half the pane, with breathing room
-    const ppu=Math.min((FILL*H-2*PAD)/bh, (FILL*Wv-2*PAD)/bw);
-    c.zoomTarget=Math.min(MAX_ZOOM,Math.max(0.45, ppu*2*6.2/H));
+    const FILL=0.85, PAD=32;
+    const midX=(x0+x1)/2, midY=(y0+y1)/2;
+    let ppu=Math.min((FILL*H-2*PAD)/bh, (FILL*Wv-2*PAD)/bw);
+    // names sit centred over their peaks (about 7.2px a letter) and may use the whole visible width up to 8px
+    // from its edges; zoom out further only as far as that needs, and never below 60% of the hills' framing
+    const ppuHills=ppu;
+    for(const q of pts){ const i=pts.indexOf(q), dx=Math.abs(transform(view,q)[0]-midX), hw=(items[i].name.length*7.2+22)/2;
+      if(dx>1e-6) ppu=Math.min(ppu, (Wv/2-8-hw)/dx); }
+    ppu=Math.max(ppu, 0.6*ppuHills);
+    c.zoomTarget=Math.min(4,Math.max(0.45, ppu*2*6.2/H));   // a selection zooms in at most 4x
+    // centre the view on that box, not on the peaks' 3-D middle (which left the group high): shift the look-at
+    // point along the ground so the box's middle lands in the middle of the visible area
+    const v0=transform(view,[cx,cy,cz]);
+    // move along the camera's own right and up (so a vertical shift is never stretched across the ground at a
+    // low tilt), and never further than 3 units from the group's middle
+    const e1=[Math.cos(c.theta),0,-Math.sin(c.theta)], fw=[cx-eye[0],cy-eye[1],cz-eye[2]], fl=Math.hypot(...fw)||1;
+    const f=fw.map(v=>v/fl), e2=[e1[1]*f[2]-e1[2]*f[1], e1[2]*f[0]-e1[0]*f[2], e1[0]*f[1]-e1[1]*f[0]];
+    const d1=transform(view,[cx+e1[0],cy+e1[1],cz+e1[2]]), d2=transform(view,[cx+e2[0],cy+e2[1],cz+e2[2]]);
+    const a11=d1[0]-v0[0], a21=d1[1]-v0[1], a12=d2[0]-v0[0], a22=d2[1]-v0[1], det=a11*a22-a12*a21;
+    if(Math.abs(det)>1e-6){ const dx=midX-v0[0], dy=midY-v0[1]; let u=(dx*a22-dy*a12)/det, w=(a11*dy-a21*dx)/det;
+      const m=Math.hypot(u,w); if(m>3){ u*=3/m; w*=3/m; }
+      c.centerTarget=[cx+u*e1[0]+w*e2[0], cy+u*e1[1]+w*e2[1], cz+u*e1[2]+w*e2[2]]; }
+    // guard: the frame must show at least one of the hills it frames, with finite numbers; if not, fall back to
+    // the previous framing (the peaks' middle, peaks only, at about half the pane)
+    { const ct=c.centerTarget, zt=c.zoomTarget, hh=6.2/zt, hw=hh*Wv/H, vc=transform(view,ct);
+      const shows=Number.isFinite(zt) && ct.every(Number.isFinite) && pts.some(q=>{ const v=transform(view,q); return Math.abs(v[0]-vc[0])<=hw && Math.abs(v[1]-vc[1])<=hh; });
+      if(!shows){
+        console.warn('selection framing fell back to the previous framing: '+items.map(t=>t.slug).join(', '));
+        const pv=pts.map(q=>transform(view,q)), pw=Math.max(0.05, Math.max(...pv.map(v=>v[0]))-Math.min(...pv.map(v=>v[0]))), ph=Math.max(0.05, Math.max(...pv.map(v=>v[1]))-Math.min(...pv.map(v=>v[1])));
+        c.centerTarget=[cx,cy,cz];
+        c.zoomTarget=Math.min(MAX_ZOOM,Math.max(0.45, Math.min((0.48*H-96)/ph, (0.48*Wv-96)/pw)*2*6.2/H));
+      } }
   }
 
   // ---------- arcs: raised curves from the selection to its related themes, per pane ----------
@@ -2097,12 +2311,14 @@
   precision highp float; in float vT; in float vS;
   uniform vec3 uColor; uniform vec3 uInk; uniform float uTime; uniform float uAlpha; out vec4 frag;
   void main(){
+    float cross = step(1.5, vT), t = vT - 2.0*cross;   // a cross-industry arc carries t + 2: draw it dashed
+    if(cross > 0.5 && fract(t*18.0) > 0.55) discard;
     float edge = 1.0 - smoothstep(0.45, 1.0, abs(vS));   // soft edges
-    if(uTime < 0.0){ frag=vec4(uColor, mix(0.9,0.5,vT)*uAlpha*edge); return; }   // reduced motion: static
+    if(uTime < 0.0){ frag=vec4(uColor, mix(0.9,0.5,t)*uAlpha*edge); return; }   // reduced motion: static
     float head = fract(uTime*0.45);                 // travels start -> end every ~2.2s
-    float d = vT - head;
+    float d = t - head;
     float tail = smoothstep(-0.25, 0.0, d) * (1.0 - smoothstep(0.0, 0.02, d));
-    float a = mix(0.62, 0.34, vT) + tail*0.6;
+    float a = mix(0.62, 0.34, t) + tail*0.6;
     frag=vec4(mix(uColor, uInk, tail*0.7), min(1.0,a)*uAlpha*edge);
   }`;
   const arcProg=gl.createProgram();
@@ -2126,13 +2342,14 @@
     const [ax,az]=posOf(p,t), a=[ax, flat?0.06:(t.peak??0)+0.05, az];
     for(const r of t.related){
       const o=t.w.items[r.id], [ox,oz]=posOf(p,o), b=[ox, flat?0.06:(o.peak??0)+0.05, oz];
+      const xo = SIM && t.level==="subthemes" && o.parentSlug!==t.parentSlug ? 2 : 0;   // dashed: another industry's market
       const d=Math.hypot(b[0]-a[0],b[2]-a[2]), rise=flat?0:0.35+0.22*d;
       let prev=null;
       for(let i=0;i<=N;i++){
         const s=i/N;
         const pt=[a[0]+(b[0]-a[0])*s, a[1]+(b[1]-a[1])*s+Math.sin(s*Math.PI)*rise, a[2]+(b[2]-a[2])*s, s];
         if(prev){                                          // a ribbon segment: two triangles
-          const A=prev.slice(0,3), B=pt.slice(0,3), v=(end,side)=>out.push(...A,...B,end,side,end?pt[3]:prev[3]);
+          const A=prev.slice(0,3), B=pt.slice(0,3), v=(end,side)=>out.push(...A,...B,end,side,(end?pt[3]:prev[3])+xo);
           v(0,-1); v(0,1); v(1,-1); v(1,-1); v(0,1); v(1,1);
         }
         prev=pt;
@@ -2496,7 +2713,8 @@
   function renderStepChrome(){
     for(const b of document.querySelectorAll(".step-tabs .tab")) b.setAttribute("aria-selected", b.dataset.step===step?"true":"false");
     for(const b of document.querySelectorAll(".subset-tabs .tab")) b.setAttribute("aria-selected", b.dataset.subset===subset?"true":"false");
-    document.querySelector(".subset-tabs").hidden = step==="landscape";
+    // brand tabs only when there is a choice: one brand's map needs no toggle
+    document.querySelector(".subset-tabs").hidden = step==="landscape" || document.querySelectorAll(".subset-tabs .tab").length<2;
     for(const b of document.querySelectorAll(".rule-tabs .tab")) b.setAttribute("aria-selected", b.dataset.rule===rule?"true":"false");
     document.querySelector(".rule-tabs").hidden = step!=="uniqueness" || !(IN_TOOL && ruleSets && ruleSets.rules.length>1);
     document.getElementById("rampLbl").firstChild.textContent = "Elevation · "+HEIGHT_WORD[heightBy]+(step==="landscape" ? " " : ", scaled by brand presence ");
@@ -2653,6 +2871,90 @@
     noiseAmp=noiseEl.value/100*0.35; $("noiseVal").textContent=noiseEl.value;
   });
   let repaintQueued=false;
+  function syncHillMode(){
+    for(const b of document.querySelectorAll('.mode-tabs .tab')) b.setAttribute('aria-selected', (b.dataset.mode==='performance')===perfMode?'true':'false');
+    renderStepChrome();
+    if(sel) renderPanel(sel);   // the panel leads with size and growth in Performance
+    document.getElementById('perfTip')?.setAttribute('hidden','');   // a hover card from the other mode never lingers
+  }
+  function setHillMode(mode){
+    perfMode = mode==='performance';   // frame() eases the hills and the colour there
+    syncHillMode();
+    const u=new URL(location.href); if(perfMode) u.searchParams.set('view','performance'); else u.searchParams.delete('view'); history.replaceState(null,'',u);
+  }
+  for(const b of document.querySelectorAll('.mode-tabs .tab')) b.addEventListener('click',()=>setHillMode(b.dataset.mode));
+  syncHillMode();
+  function stepHillMix(dt){
+    const k = reduceMotion ? 1 : dt/HILL_SECONDS, toward=(v,to)=> to>v ? Math.min(to,v+k) : Math.max(to,v-k);
+    const fT = perfMode ? 1 : 0;
+    colourP = toward(colourP, fT);
+    if(footP===fT) return;
+    if(!hillEnds){ const now=hillSnapshotNow(), other=hillSnapshot(fT); hillEnds = fT ? {a:now, b:other} : {a:other, b:now}; }
+    footP = toward(footP, fT); const e = easeHill(footP);
+    const A=hillEnds.a, B=hillEnds.b;
+    for(let i=0;i<hmBase.length;i++){ hmBase[i]=A.base[i]+(B.base[i]-A.base[i])*e; hmShrunk[i]=A.shrunk[i]+(B.shrunk[i]-A.shrunk[i])*e; }
+    for(let i=0;i<gData.length;i++) gData[i]=A.g[i]+(B.g[i]-A.g[i])*e;
+    uploadHeightmap(hmTexBase,hmBase); uploadHeightmap(hmTexIndustry,hmBase); uploadHeightmap(hmTexShrunk,hmShrunk);
+    gl.bindTexture(gl.TEXTURE_2D,growthTex); gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,HM,HM,gl.RGBA,gl.FLOAT,gData);
+    terrainItems().forEach((t,j)=>{ const pa=A.peaks[j], pb=B.peaks[j]; if(pa&&pb){ t.peakBase=pa[0]+(pb[0]-pa[0])*e; t.peakShrunk=pa[1]+(pb[1]-pa[1])*e; } });
+    updatePeaks();
+    if(footP===fT){ setHillSizes(e); drawMiniMap(); rebuildArcs(); }   // landed: the blend at 0 or 1 is that end state exactly
+  }
+  let hillEnds = null;   // the Normal (a) and Performance (b) heightmaps, painted once per transition
+  function setHillSizes(e){ for(const w of builtWorlds()) for(const t of w.items) if(t.marketFoot!=null){ t.size = t.evidenceSize + (t.marketFoot-t.evidenceSize)*e; t.height = t.evidenceHeight + (t.perfHeight-t.evidenceHeight)*e; setEvRatio(t,e); } }
+  let hillPainting = false;
+  const hillSnapshotNow = () => ({ base: hmBase.slice(), shrunk: hmShrunk.slice(), g: gData.slice(), peaks: terrainItems().map(t=>[t.peakBase,t.peakShrunk]) });
+  function hillSnapshot(e){
+    hillPainting = true; setHillSizes(e); repaintTerrain(); hillPainting = false;
+    return hillSnapshotNow();
+  }
+  const perfTip=document.createElement('div'); perfTip.id='perfTip'; perfTip.hidden=true;
+  perfTip.style.cssText='position:fixed;z-index:60;pointer-events:none;max-width:280px;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.35;background:var(--panel,#fff);color:var(--ink,#222);box-shadow:0 4px 18px rgba(0,0,0,.18);border:1px solid rgba(0,0,0,.08)';
+  document.body.appendChild(perfTip);
+  let tipX=0, tipY=0; addEventListener('pointermove',e=>{ tipX=e.clientX; tipY=e.clientY; if(!perfTip.hidden) placeTip(); },{passive:true});
+  function placeTip(){ const r=perfTip.getBoundingClientRect(); perfTip.style.left=Math.min(innerWidth-r.width-8, tipX+14)+'px'; perfTip.style.top=Math.min(innerHeight-r.height-8, tipY+14)+'px'; }
+  const perfRange = p => p.lo!=null && p.hi!=null ? `${p.lo.toFixed(1)} to ${p.hi.toFixed(1)}%` : null;
+  // growth on one scale for every industry and market: a thin line, a dot at the estimate, the ends of the scale under it;
+  // an estimated rate also shows its likely range, as a shaded band and a line of text between the ends (10 Nov)
+  function growthBar(p){
+    const x=v=>`${(100*(v-GAX[0])/(GAX[1]-GAX[0])).toFixed(2)}%`, mk=(css)=>{ const e=document.createElement('i'); e.style.cssText='position:absolute;display:block;'+css; return e; };
+    const box=document.createElement('span'); box.className='gbar';
+    box.title=`${p.r.toFixed(1)}% a year${perfRange(p) ? `, likely ${perfRange(p)}` : ''}. Every bar uses the same scale, ${GAX[0]} to ${GAX[1]}% a year.`;
+    const track=document.createElement('span'); track.style.cssText='position:relative;display:block;height:14px';
+    track.append(mk('left:0;right:0;top:6px;height:2px;border-radius:1px;background:color-mix(in srgb, var(--accent) 22%, transparent)'));
+    if(perfRange(p)) track.append(mk(`left:${x(p.lo)};width:calc(${x(p.hi)} - ${x(p.lo)});top:5px;height:4px;border-radius:2px;background:color-mix(in srgb, var(--accent) 45%, transparent)`));
+    track.append(mk(`left:${x(p.r)};top:0;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:color-mix(in srgb, var(--ink) 82%, transparent)`));
+    const cap=document.createElement('span'); cap.className='gbar-cap';
+    cap.innerHTML=`<span>${GAX[0]}%</span><span>${GAX[1]}%</span>`;
+    if(perfRange(p)){ const r=document.createElement('span'); r.className='gbar-range'; r.textContent=`${p.lo.toFixed(1)}% \u2013 ${p.hi.toFixed(1)}%`;
+      r.style.left=x(p.r); r.dataset.at=x(p.r); cap.append(r); }   // centred on the dot; fitRanges() keeps it clear of the axis end labels
+    box.append(track,cap); return box;
+  }
+  /** Centre each range label on its dot; where that would touch an end label, align it to that side instead
+   *  (8px clear), measured from the rendered text so it holds at any panel width. */
+  function fitRanges(root){
+    for(const r of root.querySelectorAll('.gbar-range')){
+      const cap=r.parentElement, [lo,hi]=cap.querySelectorAll(':scope > span:not(.gbar-range)'), G=8;
+      r.style.left=r.dataset.at; r.style.transform='translateX(-50%)';
+      const c=cap.getBoundingClientRect(), a=r.getBoundingClientRect(), L=lo.getBoundingClientRect(), H=hi.getBoundingClientRect();
+      if(!c.width) continue;   // not laid out yet
+      if(a.left < L.right+G){ r.style.left=`${L.right-c.left+G}px`; r.style.transform='none'; }
+      else if(a.right > H.left-G){ r.style.left=`${H.left-c.left-G-a.width}px`; r.style.transform='none'; }
+    }
+  }
+  addEventListener('resize', ()=>fitRanges(document.getElementById('pKpis')));
+  // Normal height / painted height for a hill at blend e (1 in Normal): the shader scales the shape back to Normal's colour
+  function setEvRatio(t,e){ const h=t.evidenceHeight+(t.perfHeight-t.evidenceHeight)*e; t.evRatio = h>1e-6 ? t.evidenceHeight/h : 1; }
+  const evidenceLine = t => { const c=peakCounts(peakKey(t)); return !c || !c.docs ? 'no evidence yet' : `${c.docs} ${c.docs===1?'document':'documents'} · ${c.ex} excerpts`; };
+  function showPerfTip(t){
+    const p = t && perfMode && step==='landscape' ? t.perf : null;
+    if(!p){ perfTip.hidden=true; return; }
+    const esc=x=>String(x).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const size = !t.isSubTheme && t.sizeLabel ? ` · ${esc(t.sizeLabel)}` : '';
+    perfTip.innerHTML=`<b>${esc(t.name)}</b><br><span style="font-size:15px;font-weight:600">${p.r.toFixed(1)}%</span> a year${size}<br>`+
+      `${esc(evidenceLine(t))}`;
+    perfTip.hidden=false; placeTip();
+  }
   spreadEl.addEventListener("input",()=>{                 // footprint change: repaint, once per frame
     spreadMul=spreadEl.value/100; $("spreadVal").textContent=spreadMul.toFixed(1)+"×";
     if(repaintQueued) return;
@@ -2756,6 +3058,7 @@
   function frame(){
     const now=performance.now(), dt=Math.min(0.05,(now-lastT)/1000); lastT=now;
     if(stepRoll(now) || stepField(dt)) rebuildArcs();
+    stepHillMix(dt);
     if(spin && !reduceMotion) paneA.cam.theta+=0.0016;
     const introNow=introFrame(now);
     stepViewFx(now);
@@ -2791,6 +3094,8 @@
         gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,fieldTex);    gl.uniform1i(U.field,2);
         gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D,rampTex);     gl.uniform1i(U.ramp,3);
         gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D,hmTexIndustry); gl.uniform1i(U.industry,4);
+        gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D,growthTex); gl.uniform1i(U.growth,5);
+        gl.uniform1f(U.growthOn, step==='landscape' ? easeHill(colourP) : 0);
         const envelope=!flat && (shrinkTarget>0 || front!==Infinity || introNow.intro>0);   // the ghost pass below runs
         gl.uniform1f(U.envelope, envelope && !introNow.intro ? 1 : 0);   // mid-intro the growing terrain keeps its own contours
         gl.uniform1f(U.ghost,0);
@@ -2855,9 +3160,12 @@
     await booted.catch(()=>{});
     const [bundle, docs]=await Promise.all(["data/bundle","data/docs"].map(u=>fetch(u,{cache:"no-store"}).then(r=>r.ok?r.json():null).catch(()=>null)));
     if(n!==refreshSeq || !bundle || !loaded()) return;           // only the latest answer counts
+    const sim = await loadSimilarity(bundle); await Promise.all([loadGrowth(), loadPresence()]);   // the optional layers too
+    if(n!==refreshSeq) return;
     if(viewFx) finishViewFx();
+    SIM = sim;
     readBundle(bundle);
-    docsData=withLicensed(docs); evidenceCache.clear();
+    docsData=cleanSummaries(docs); evidenceCache.clear();
     const levels={A:paneA.world.level, B:paneB.world.level}, was=sel && {slug:sel.slug, level:sel.level};
     setHover(null);
     const change=()=>{

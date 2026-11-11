@@ -13,18 +13,18 @@ Change a number in settings.json and rerun: the build prints which peaks moved.
 import json
 import math
 import os
+import shutil
 import subprocess
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 if "ROOT" not in globals():  # ROOT (the working folder) and RULES come from build.py
     raise SystemExit("run this through build.py: python3 -I packages/landscape/build.py <working-folder> map")
-FINDINGS = ROOT / "landscape" / "evidence" / "findings"
-OUT = ROOT / "landscape" / "map"
-SETTINGS = json.loads((RULES / "settings.json").read_text())
-GRADE_WEIGHT = SETTINGS["height"]["gradeWeight"]
-CAP = SETTINGS["height"]["perDocumentCap"]  # the most one document can add to one peak
-MIN_SALIENCE = SETTINGS["mention"]["minSalience"]  # below this a mention is a name-drop: panel only
+OUT = MAP_DIR  # landscape/map, or a client's own copy (build.py: PATHWAYS_CLIENT)
+SETTINGS = RULE_SETTINGS()  # the rules, with the Settings page's saved ones (build.py rule_settings())
+# How peaks grow: the rules' own, or the Map tab's saved settings (build.py heights()).
+H = HEIGHTS()
+GRADE_WEIGHT, CAP, MIN_SALIENCE, recency = H["gradeWeight"], H["perDocumentCap"], H["minSalience"], H["recency"]
 MUST_VERIFY = SETTINGS["mention"].get("excerptMustVerify", True)  # unverified excerpts add no height
 # The context factors come from Cloudflare (Fetch latest saves them in the working folder): they were worked out
 # from the client's documents, so they're never in the public plugin.
@@ -37,14 +37,17 @@ previous = {t["slug"]: t["frequency"] for t in json.loads(PREVIOUS.read_text())[
 
 structure = json.loads((ROOT / "landscape" / "structure.json").read_text())
 
-# Curation: the team's accepted renames, merges, moves, hides and added markets. Each is a
-# decision record in landscape/decisions/; the curate tool (the cms repo,
-# packages/curation, still on its spike branch) applies them and says where removed items' evidence goes.
+# Curation: the team's accepted renames, merges, moves, hides, added markets and industries, confirmed
+# markets and excerpts taken off. Each is a decision record in landscape/decisions/; the curate tool
+# (packages/curation; the tool sets PATHWAYS_CURATE) applies them to the structure plus the markets added
+# from evidence, and says where removed items' evidence goes.
 DECISIONS = ROOT / "landscape" / "decisions"
 PREVIEW = [x for x in os.environ.get("PATHWAYS_PREVIEW", "").split(",") if x]
-curation = {"applied": [], "remap": {"markets": {}, "industries": {}}}
-if DECISIONS.is_dir() and any(DECISIONS.glob("*.json")):
-    tool = os.environ.get("PATHWAYS_CURATE")
+curation = {"applied": [], "remap": {"markets": {}, "industries": {}}, "hiddenFindings": []}
+CURATED = False
+# The tool always sets PATHWAYS_CURATE, so its builds take the same path with or without decisions.
+tool = os.environ.get("PATHWAYS_CURATE")
+if tool or (DECISIONS.is_dir() and any(DECISIONS.glob("*.json"))):
     if not tool:
         raise SystemExit("landscape/decisions/ has decisions: build with `curate rebuild` (or set PATHWAYS_CURATE to curate.mjs)")
     cmd = ["node", tool, "effective", "--workspace", str(ROOT)] + [a for x in PREVIEW for a in ("--preview", x)]
@@ -53,13 +56,19 @@ if DECISIONS.is_dir() and any(DECISIONS.glob("*.json")):
         raise SystemExit(result.stderr.strip() or "curate effective failed")
     curation = json.loads(result.stdout)
     structure = curation["structure"]
+    CURATED = True
 REMAP_MARKET, REMAP_INDUSTRY = curation["remap"]["markets"], curation["remap"]["industries"]
+HIDDEN = set(curation.get("hiddenFindings", []))
+FROM_EVIDENCE = ("curation", "minted")  # origins of markets that must meet the evidence rule
 moved_findings = dropped_findings = 0
 
 
 def place(f):
     """Where a finding's evidence goes after curation: unchanged, another peak, or nowhere (None)."""
     global moved_findings, dropped_findings
+    if f.get("id") in HIDDEN:
+        dropped_findings += 1
+        return None
     table = REMAP_MARKET if f["level"] == "market" else REMAP_INDUSTRY
     if f["slug"] not in table:
         return f
@@ -72,36 +81,40 @@ def place(f):
 
 sectors = {s["slug"]: s for s in structure["sectors"]}
 industries = {i["slug"]: i for i in structure["industries"]}
-markets = {m["slug"]: m for m in structure["markets"] if m.get("origin") != "curation"}
+markets = {m["slug"]: m for m in structure["markets"] if m.get("origin") not in FROM_EVIDENCE}
 
 docs = {}
-findings, proposals, shaping = [], {}, []
-for path in sorted(FINDINGS.glob("*.json")):
-    data = json.loads(path.read_text())
+findings, proposals, shaping, presence = [], {}, [], []
+for data in EVIDENCE():
     doc = data["doc"]
     docs[doc["id"]] = doc
-    for f in data.get("proposals", []):
+    for f in data["proposals"]:
         proposals[f["id"]] = {**f, "doc": doc["id"]}
-    for f in data.get("shaping", []):
+    for f in data["shaping"]:
         affects = [t for t in f.get("affects", []) if t not in REMAP_MARKET or (REMAP_MARKET[t] or {}).get("level") == "market"]
         affects = [REMAP_MARKET[t]["slug"] if t in REMAP_MARKET else t for t in affects]
         shaping.append({**f, "affects": affects, "doc": doc["id"]})
-    for f in data["findings"]:
-        f = place(f)
-        if f is None:
-            continue
-        if f["level"] == "market" and f["slug"] not in markets:
-            raise SystemExit(f"{path.name}: unknown market {f['slug']}")
-        if f["level"] == "industry" and f["slug"] not in industries:
-            raise SystemExit(f"{path.name}: unknown industry {f['slug']}")
-        findings.append({**f, "doc": doc["id"]})
+    for kept, items in ((findings, data["findings"]), (presence, data["presence"])):
+        for f in items:
+            f = place(f)
+            if f is None:
+                continue
+            if (f["level"] == "market" and f["slug"] not in markets) or (f["level"] == "industry" and f["slug"] not in industries):
+                raise SystemExit(f"{doc['id']}: unknown {f['level']} {f['slug']}")
+            kept.append({**f, "doc": doc["id"]})
 
 
 # Markets added from evidence (rules.md section 4): check each against the rule, then add it.
-# Each lists the ids of the proposal findings that back it.
-MINTED = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
-# Markets the team added by decision go through the same evidence rule.
-MINTED += [m for m in structure["markets"] if m.get("origin") == "curation"]
+# Each lists the ids of the proposal findings that back it. A client's own additions live in
+# client/<client>/minted-markets.json and only reach that client's map (section 5b).
+# Once curated, the structure already holds them (origin "minted"), as the decisions left them.
+if CURATED:
+    MINTED = [m for m in structure["markets"] if m.get("origin") in FROM_EVIDENCE]
+else:
+    MINTED = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
+    CLIENT_MINTED = ROOT / "client" / CLIENT / "minted-markets.json" if CLIENT else None
+    if CLIENT_MINTED and CLIENT_MINTED.exists():
+        MINTED += json.loads(CLIENT_MINTED.read_text())["markets"]
 unplaced = proposals
 
 
@@ -114,11 +127,12 @@ minted_slugs = set()
 for m in MINTED:
     if m["industry"] not in industries:
         raise SystemExit(f"minted market {m['slug']}: unknown industry {m['industry']}")
-    missing = [ref for ref in m["evidence"] if ref not in unplaced]
+    # An excerpt taken off by decision no longer backs the market, but isn't missing either.
+    missing = [ref for ref in m["evidence"] if ref not in unplaced and ref not in HIDDEN]
     if missing:
         print(f"WARNING: {m['title']}: evidence not found ({', '.join(missing[:3])}); left off the map")
         continue
-    mentions = [unplaced[ref] for ref in m["evidence"]]
+    mentions = [unplaced[ref] for ref in m["evidence"] if ref not in HIDDEN]
     real = [u for u in mentions if counts(u) and not docs[u["doc"]].get("demandSurvey")]
     strong_per_doc = defaultdict(int)
     for u in real:
@@ -157,7 +171,7 @@ for f in findings:
 
 
 def height(sal, peak, doc_ids):
-    return round(sum(GRADE_WEIGHT[docs[d]["grade"]] * CAP * (1 - math.exp(-sal[peak, d] / CAP)) for d in doc_ids), 2)
+    return round(sum(GRADE_WEIGHT[docs[d]["grade"]] * recency(docs[d].get("year")) * CAP * (1 - math.exp(-sal[peak, d] / CAP)) for d in doc_ids), 2)
 
 
 def titles(doc_ids):
@@ -176,7 +190,8 @@ for f in shaping:
 
 
 def shaped_by(slug):
-    top = sorted(shaped[slug].items(), key=lambda kv: -kv[1])[:3]
+    # A tie goes by name, never by the order files were read in (their names are document ids).
+    top = sorted(shaped[slug].items(), key=lambda kv: (-kv[1], kv[0]))[:3]
     return [name for name, _ in top]
 
 
@@ -216,7 +231,7 @@ for slug, ind in industries.items():
             "weight": 0.0,
             "sources": titles(mkt_docs[m["slug"]]),
             "minted": m["slug"] in minted_slugs,
-            "archetype": m["archetype"],
+            "archetype": m.get("archetype"),  # a market a person added may have none
             "mergedFrom": m.get("mergedFrom"),
         })
     top = max((r["mentions"] for r in rows), default=0) or 1
@@ -224,8 +239,42 @@ for slug, ind in industries.items():
         r["weight"] = round(r["mentions"] / top, 3)
     subthemes[slug] = rows
 
+def brand_pack():
+    """The client's presence on each industry: where it sells or explores, on the same curve and grades as
+    height, scaled so the industry it is most present in reads 1. How customers perceive the client is not
+    presence (5 Nov check-in): it is only counted, for a perception panel. Summaries only, never excerpts."""
+    if not CLIENT:
+        return []
+    sal, by_ind, perceived = defaultdict(float), defaultdict(list), Counter()
+    for f in presence:
+        ind = industry_of(f)
+        if f.get("state") == "perceived":
+            perceived[ind] += 1
+            continue
+        by_ind[ind].append(f)
+        if counts(f):
+            sal[ind, f["doc"]] += f["salience"]
+    raw = {ind: height(sal, ind, {f["doc"] for f in fs if counts(f)}) for ind, fs in by_ind.items()}
+    top = max(raw.values(), default=0) or 1
+    themes_ = {}
+    for ind, fs in by_ind.items():
+        best = max(fs, key=lambda f: (f["salience"], f["summary"], docs[f["doc"]]["title"]))
+        p = round(raw[ind] / top, 3)
+        themes_[ind] = {"presenceNormalised": p, "presence": raw[ind], "mentionCount": len(fs),
+                        "docs": len({f["doc"] for f in fs}),
+                        "states": dict(Counter(f.get("state") for f in fs)),
+                        "strength": "strong" if p >= 0.6 else "some" if p >= 0.25 else "weak",
+                        "perceived": perceived[ind],
+                        "snippet": best["summary"], "source": docs[best["doc"]]["title"]}
+    for ind in perceived.keys() - themes_.keys():
+        themes_[ind] = {"presenceNormalised": 0, "presence": 0, "mentionCount": 0, "docs": 0, "states": {},
+                        "perceived": perceived[ind], "strength": "none", "snippet": "", "source": ""}
+    return [{"entityId": CLIENT, "title": CLIENT, "themes": themes_, "dna": [], "ownedAxis": None, "verdicts": {}}]
+
+
+name = "Wellness landscape v2" + (f" ({CLIENT})" if CLIENT else "")
 bundle = {
-    "workspace": {"id": "landscape-v2", "name": "Wellness landscape v2", "slug": "landscape-v2"},
+    "workspace": {"id": "landscape-v2", "name": name, "slug": "landscape-v2"},
     "heightBy": "documents",
     "structure": {"industries": [
         {"slug": s["slug"], "title": s["title"], "marketSizeUsdB": s["marketSizeUsdB"], "cagr": s["cagr2019_24"]}
@@ -233,18 +282,11 @@ bundle = {
     ]},
     "themes": themes,
     "subthemes": subthemes,
-    "brands": [],
+    "brands": brand_pack(),
 }
-
-
-# Licensed or internal-use sources (same list as build-docs.py): their findings add height, but
-# the panel never shows their text; it counts them instead.
-INTERNAL = internal_sources()  # build.py: the rules' list plus Cloudflare's
-
-
-def is_internal(doc_id):
-    d = docs[doc_id]
-    return any(k in (d.get("publisher") or "") for k in INTERNAL["publishers"]) or doc_id.startswith(tuple(INTERNAL["idPrefixes"]))
+# A draft preview is for looking at only: Publish refuses a map built with one (apps/ui/standalone/publish.ts).
+if PREVIEW:
+    bundle["preview"] = PREVIEW
 
 
 def excerpt(f):
@@ -254,6 +296,17 @@ def excerpt(f):
 
 
 inside(OUT / "evidence").mkdir(parents=True, exist_ok=True)
+if CLIENT:  # a client's copy reuses the public documents' covers and summaries
+    for folder in ("covers", "doc-summaries"):
+        source = ROOT / "landscape" / "map" / folder
+        if source.is_dir() and not source.is_symlink():
+            for path in source.rglob("*"):
+                # Links are skipped and every write is checked, so nothing is read from or written outside the folder.
+                if path.is_symlink() or not path.is_file():
+                    continue
+                target = inside(OUT / folder / path.relative_to(source))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
 for slug in industries:
     topics = []
     general = [f for f in ind_findings[slug] if f["level"] == "industry"]
@@ -264,10 +317,10 @@ for slug in industries:
         if fs:
             fs = sorted(fs, key=lambda f: -f["salience"])
             ok = [f for f in fs if f.get("verified") or not MUST_VERIFY]
-            shown = [f for f in ok if not is_internal(f["doc"])]
+            # licensed passages are shown like any other (10 Nov); internalOnly stays for the page, always 0
             topics.append({"key": key, "title": title, "documents": len({f["doc"] for f in ok}),
-                           "excerpts": [excerpt(f) for f in shown],
-                           "internalOnly": len(ok) - len(shown),
+                           "excerpts": [excerpt(f) for f in ok],
+                           "internalOnly": 0,
                            "unverified": sorted({docs[f["doc"]]["title"] for f in fs if f not in ok})})
     evidence = {"topics": topics, "excerptCount": len(ind_findings[slug]),
                 "documentCount": len({f["doc"] for f in ind_findings[slug]})}
@@ -277,7 +330,7 @@ inside(OUT / "bundle.json").write_text(json.dumps(bundle, indent=2, ensure_ascii
 
 flat = sum(1 for t in themes if t["noSignal"])
 dry = sum(1 for rows in subthemes.values() for r in rows if not r["docs"])
-print(f"{len(docs)} documents ({sum(1 for d in docs.values() if d['grade'] != 'drop')} used), {len(findings)} findings")
+print(f"{len(docs)} documents ({sum(1 for d in docs.values() if d['grade'] not in ('drop', 'panel'))} used), {len(findings)} findings")
 if curation["applied"]:
     sets = sorted({d["set"] for d in curation["applied"]})
     print(f"curation: {len(curation['applied'])} decisions applied (sets {', '.join(sets)})"

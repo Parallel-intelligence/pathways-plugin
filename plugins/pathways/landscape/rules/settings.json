@@ -17,7 +17,8 @@
     "gradeWeight": {
       "keep": 1.0,
       "weak": 0.5,
-      "drop": 0.0
+      "drop": 0.0,
+      "panel": 0.0
     },
     "perDocumentCap": 3.0,
     "curve": "smooth"
@@ -48,7 +49,7 @@
     "wordsPerPart": 12000
   },
   "internalSources": {
-    "note": "Licensed or internal-use sources: they add height, but no excerpt, cover or link is ever shown. The plugin is public, so the sources' names come from Cloudflare (the settings record internal-sources, saved by Fetch latest as landscape/internal-sources.json) and are added to these.",
+    "note": "Licensed or internal-use sources: they add height and, since 10 Nov, are shown like any other (excerpts, cover, link); the list only labels documents as licensed. The plugin is public, so the sources' names come from Cloudflare (the settings record internal-sources, saved by Fetch latest as landscape/internal-sources.json) and are added to these.",
     "publishers": [],
     "idPrefixes": [
       "licensed-"
