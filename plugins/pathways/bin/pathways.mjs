@@ -3805,7 +3805,7 @@ async function rollbackStaging(call, version) {
 /**
 * Sends a published version to the client, holding the checkout. The admin Worker copies it from staging into
 * production, every file checked, then points the client's portal at it; a large version takes a few calls, each
-* answering 202 until every file is there. Only an admin who didn't publish the version can do it the first time.
+* answering 202 until every file is there. Only an admin can, once the version has been live on staging.
 */
 async function promoteVersion(call, version, onProgress = () => {}) {
 	if (!/^v\d{4}$/.test(version)) throw new Error("That isn't a version.");
