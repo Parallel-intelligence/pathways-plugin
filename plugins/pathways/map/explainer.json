@@ -14,92 +14,86 @@
       "status": "available",
       "steps": [
         {
-          "scene": "why",
-          "title": "Why a landscape",
+          "scene": "rank",
+          "title": "Foundations",
           "lines": [
-            "A list ranks.",
-            "A landscape shows neighbours, and gaps."
-          ],
-          "marks": {
-            "neighbours": "Neighbours",
-            "gap": "Gap"
-          }
+            "Using AI, we process and measure information about industries and markets from source material, scoring it across various dimensions."
+          ]
         },
         {
           "scene": "hill",
-          "title": "What's a hill",
+          "title": "Defining the landscape",
           "lines": [
-            "One hill, one market."
+            "The **height** of each peak shows how much credible evidence backs it across our sources; its **width** shows how often it's mentioned."
           ],
           "marks": {
             "height": "Height",
-            "heightNote": "more evidence",
+            "heightNote": "strength of evidence",
             "width": "Width",
-            "widthNote": "more evidence, gently",
-            "flat": "no evidence yet"
+            "widthNote": "how often it's mentioned"
           }
         },
         {
-          "scene": "proximity",
-          "title": "Positioning",
+          "scene": "impact",
+          "title": "Controlling impact",
           "lines": [
-            "Related markets sit close.",
-            "Unrelated ones sit apart."
+            "Lots of evidence from a single source has a **diminishing impact**, but supporting evidence from multiple sources has a **greater impact**."
           ],
           "marks": {
-            "related": "Related",
-            "apart": "Apart"
+            "height": "Height",
+            "heightNote": "strength of evidence",
+            "width": "Width",
+            "widthNote": "how often it's mentioned",
+            "single": "1 document · 30 excerpts",
+            "multi": "4 documents · 13 excerpts"
           }
         },
         {
           "scene": "levels",
           "title": "Two views",
           "lines": [
-            "One hill per industry.",
-            "Its markets are the peaks."
+            "In the first view, each hill represents an industry, its size informed by the **markets it contains**.",
+            "The second view reveals **all markets**, each one a peak of its own."
           ],
           "marks": {
             "industry": "Industry",
             "market": "Market",
             "industries": "Industries",
-            "markets": "Markets"
+            "markets": "Markets",
+            "single": "1 document · 30 excerpts",
+            "multi": "4 documents · 13 excerpts"
           }
         },
         {
-          "scene": "height",
-          "title": "How height is made",
+          "scene": "proximity",
+          "title": "Positioning",
           "lines": [
-            "Documents hold excerpts.",
-            "Each one adds a little less.",
-            "A new document lifts it again."
+            "Peaks in the same industry gather together, so the closer two peaks are, **the more they have in common**."
           ],
           "marks": {
-            "excerpt": "Excerpt"
+            "related": "Related",
+            "unrelated": "Unrelated"
           }
         },
         {
-          "scene": "basemap",
-          "title": "The base map",
+          "scene": "growth",
+          "title": "Growing the landscape",
           "lines": [
-            "First, the base map.",
-            "Flat, until evidence arrives."
+            "As more documents are added and we learn new insights, **emerging industries and markets** appear on the map, and existing ones will be updated."
           ],
-          "note": "Sectors from GWI. Industries and markets defined by &go&co.",
           "marks": {
-            "sector": "Sector",
-            "industry": "Industry"
+            "related": "Related",
+            "unrelated": "Unrelated"
           }
         },
         {
-          "scene": "emergent",
-          "title": "Established and emergent",
+          "scene": "unique",
+          "title": "Uniquely yours",
           "lines": [
-            "Most hills come from the base map.",
-            "New ones rise where documents point."
+            "No two landscapes are alike. Adding your brand's own data further elevates insight and helps us spot **opportunities** and understand a world that is truly yours."
           ],
           "marks": {
-            "established": "Established",
-            "emergent": "Emergent"
+            "opportunity": "Opportunity?"
           }
         }
       ]
@@ -127,7 +121,7 @@
       "title": "How we use your data",
       "status": "available",
       "kind": "info",
-      "updated": "5 November 2026",
+      "updated": "11 November 2026",
       "contact": null,
       "parts": [
         {
@@ -135,7 +129,7 @@
           "title": "Privacy notice",
           "blocks": [
             {
-              "p": "This notice is for the people who sign in to the Pathways portal. It says what we hold about you, why, and for how long."
+              "p": "This notice is for the people who sign in to the Pathways portal, and for anyone who takes part in a Pathways workshop by joining on their phone. It says what we hold about you, why, and for how long."
             },
             {
               "h": "Who we are"
@@ -160,7 +154,25 @@
               ]
             },
             {
-              "p": "Nothing else. There are no passwords, and no analytics, advertising or tracking."
+              "p": "That's all for the portal: there are no passwords, and no analytics, advertising or tracking."
+            },
+            {
+              "h": "If you take part in a workshop"
+            },
+            {
+              "p": "You join a workshop on your phone with a code, without signing in. When you take part, we hold:"
+            },
+            {
+              "ul": [
+                [
+                  "Your first name and your team",
+                  " (brand, product or research). Your name shows on the big screen while people join and place. It's deleted when the facilitator saves the session, or 7 days after the session was set up if it's never saved."
+                ],
+                [
+                  "Your placements on the workshop's grids, and any line of why you add.",
+                  " The room sees them in your team's colour, never with your name, and they're saved with your team, never your name. If you're the only one from your team, people in the room may be able to tell which are yours."
+                ]
+              ]
             },
             {
               "h": "Cookies"
@@ -172,16 +184,20 @@
               "p": "The map also remembers a few display choices in your browser, such as the colour scale and how far you've got in How it works. They stay on your device and are never sent to us."
             },
             {
+              "p": "If you join a workshop, your phone remembers your name, team and answers for that session, so a reload picks up where you left off. They're cleared from it when the session ends."
+            },
+            {
               "h": "Why we hold it"
             },
             {
               "ul": [
                 "To let only the people your organisation has approved in.",
-                "To keep the portal and your organisation's information secure, and to look into misuse."
+                "To keep the portal and your organisation's information secure, and to look into misuse.",
+                "To run workshops your organisation has asked us for, and keep a record, by team, of where the room placed your brand."
               ]
             },
             {
-              "p": "We do this because we have a legitimate interest in keeping the portal secure, and to provide the service your organisation has asked us for. We don't use your data for anything else, and we don't sell it or share it with anyone else."
+              "p": "We do this because we have a legitimate interest in keeping the portal secure, and to provide the service your organisation has asked us for, its workshops included. We don't use your data for anything else, and we don't sell it or share it with anyone else."
             },
             {
               "h": "Who can see it"
@@ -193,7 +209,7 @@
               ]
             },
             {
-              "p": "The portal runs no AI, and sends nothing about you to any AI service."
+              "p": "The portal and the workshop run no AI, and send nothing about you to any AI service."
             },
             {
               "h": "How long we keep it"
@@ -201,6 +217,7 @@
             {
               "ul": [
                 "Your portal account: until 12 months after the engagement ends, or sooner if your organisation asks.",
+                "Workshop results (placements and lines of why by team, and evidence requests with their owner's role): until 17 January 2027, then deleted, with any copies our team downloaded. Cloudflare's backups can restore deleted data for up to 30 days after that. Names never outlast the session.",
                 "Cloudflare's sign-in records: for a short period, under Cloudflare's terms."
               ]
             },
@@ -237,8 +254,8 @@
                 "rows": [
                   [
                     "Cloudflare",
-                    "Storage, database, the portal and its sign-in",
-                    "Your organisation's documents, our findings, published versions of the map, portal users and sign-in records",
+                    "Storage, database, the portal, the workshop and their sign-in",
+                    "Your organisation's documents, our findings, published versions of the map, portal users and sign-in records, workshop sessions and their results",
                     "North America; the portal itself runs on Cloudflare's global network"
                   ],
                   [

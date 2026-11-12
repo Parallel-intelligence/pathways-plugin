@@ -96,7 +96,8 @@
     btn.disabled=isDefault; btn.textContent=isDefault ? "Default ✓" : "Make default";
   }
   document.getElementById("rampDefault").addEventListener("click",()=>{ try{ localStorage.setItem("ramp-default", rampName); }catch(e){} syncRampDefault(); });
-  applyRamp(savedRamp() || "goandco");
+  // no light / dark toggle (12 Nov): a light scale remembered in this browser is ignored, so nobody is left in light
+  applyRamp((r=>r && !LIGHT_RAMPS.has(r) ? r : null)(savedRamp()) || "goandco");
 
   // ---------- theme data: Structure (GWI industries) + Signal (richness hills) ----------
   const SPAN = 10;              // terrain spans [-5,5] in X and Z
@@ -511,9 +512,10 @@
       const data=await r.json();
       [SIM] = await Promise.all([loadSimilarity(data), loadGrowth()]);   // relatedness and places (null keeps the old layout); growth
       readBundle(data);
-      // Brand and Uniqueness show faded and can't be opened until a version carries brands
+      // Presence (the brand step) shows faded and can't be opened until a version carries brands; Uniqueness stays
+      // greyed out in the page until it's scored (12 Nov), whatever the data
       brandsReady = data.brands.length>0;
-      for(const t of document.querySelectorAll('.step-tabs .tab[data-step="brand"], .step-tabs .tab[data-step="uniqueness"]')){
+      for(const t of document.querySelectorAll('.step-tabs .tab[data-step="brand"]')){
         t.dataset.about ??= t.title; t.disabled=!brandsReady; t.classList.toggle("soon", !brandsReady);
         t.title = brandsReady ? t.dataset.about : "Brand positions appear here once they're published.";
         // a disabled tab never shows its tooltip to keyboard, touch or screen reader users, so its name says why
@@ -940,6 +942,8 @@
     vec3 col = ramp(t);
     if(uGrowthOn > 0.001){
       vec4 f = texture(uGrowth, vUv);
+      // Growth keeps each hill's Activity colours (f.g = Activity height over Growth height), so colour still reads as
+      // evidence while the shape shows growth. The 12 Nov inverted trial confused readers and was reverted.
       col = mix(col, ramp(mix(uFloorT, 1.0, clamp(vH*f.g, 0.0, 1.0) * (1.0-uFlat))), uGrowthOn);
     }
 
@@ -1624,7 +1628,7 @@
     const h=document.createElement("h4"); h.className="doc-title"; h.title=title;
     const hb=document.createElement("button"); hb.type="button"; hb.textContent=title; hb.addEventListener("click",()=>openDocument(id)); h.appendChild(hb);
     const by=document.createElement("div"); by.className="doc-by";
-    const pub=document.createElement("span"); pub.className="pub"; pub.textContent=[d.publisher,d.year].filter(Boolean).join(" · "); pub.title=d.publisher;
+    const pub=document.createElement("span"); pub.className="pub"; pub.textContent=[d.publisher,d.year,(d.internal||d.licensed)?"Licensed":null].filter(Boolean).join(" · "); pub.title=d.publisher;
     const g=document.createElement("span"); g.className="grade g-"+d.grade;
     const [gl,gt]=GRADE[d.grade]||[d.grade,""];
     g.textContent=gl; g.title=gt;
