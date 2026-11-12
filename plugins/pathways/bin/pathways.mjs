@@ -926,6 +926,43 @@ function decisionsHandler(landscapeDir, who, reviewer = who) {
 	};
 }
 //#endregion
+//#region standalone/findings.ts
+/** A client id as build.py's safe_name takes it: lowercase letters, digits and dashes. It names a folder here. */
+var CLIENT_ID = /^[a-z0-9][a-z0-9-]{0,150}$/;
+function readFolder(folder) {
+	if (!existsSync(folder)) return [];
+	return readdirSync(folder).filter((name) => name.endsWith(".json")).sort().map((name) => {
+		const file = path.join(folder, name);
+		return {
+			name,
+			data: JSON.parse(readFileSync(file, "utf8")),
+			added: statSync(file).mtime
+		};
+	});
+}
+/**
+* Every findings file the build reads for a map: the public ones, and on a client's own map the client's too, from the
+* client-merge step (client/<client>/findings-v2/). A client document must never share an id with a public one: it
+* would take over its grade and its licensing.
+*/
+function findingsFiles(root, client) {
+	if (client !== null && !CLIENT_ID.test(client)) throw new Error("A client id is lowercase letters, digits and dashes.");
+	const publicFiles = readFolder(path.join(root, "landscape", "evidence", "findings"));
+	const ownFiles = client ? readFolder(path.join(root, "client", client, "findings-v2")) : [];
+	const publicIds = new Set(publicFiles.map(({ data }) => data.doc.id));
+	const clash = ownFiles.find(({ data }) => publicIds.has(data.doc.id));
+	if (clash) throw new Error(`a client document shares an id with a public one: ${clash.name}`);
+	return {
+		publicFiles,
+		ownFiles
+	};
+}
+/** The ids of the documents the build has findings for, public and the client's own: what "analysed" means. */
+var analysedIds = (root, client) => {
+	const { publicFiles, ownFiles } = findingsFiles(root, client);
+	return new Set([...publicFiles, ...ownFiles].map(({ data }) => data.doc.id));
+};
+//#endregion
 //#region workspace.ts
 var RULES = path.resolve(import.meta.dirname, "../../packages/landscape/rules");
 /**
@@ -935,8 +972,6 @@ var RULES = path.resolve(import.meta.dirname, "../../packages/landscape/rules");
 var documentId$1 = (sha256, confidentiality) => `${confidentiality === "licensed" ? "licensed" : "d"}-${sha256.slice(0, 12)}`;
 /** Where the working folder is: the documents fetched for this laptop, and the landscape built from them. */
 var workingFolderPath = () => path.resolve(process.env.PATHWAYS_WORKSPACE ?? path.join(os.homedir(), "Downloads", "Pathways"));
-/** A client id as build.py's safe_name takes it: lowercase letters, digits and dashes. */
-var CLIENT_ID = /^[a-z0-9][a-z0-9-]{0,150}$/;
 /**
 * The client whose own map the build makes (PATHWAYS_CLIENT), or null for the public map. The plugin is public, so
 * the client is never named in code: it comes from the environment, checked as build.py checks it.
@@ -1029,27 +1064,6 @@ var MOTIVATIONS = /* @__PURE__ */ new Set([
 	"Play",
 	"Growth"
 ]);
-/**
-* A client's own findings files (client/<client>/findings-v2/, from the client-merge step), read as build.py's
-* evidence() reads them for the client's map: market findings add height, market proposals can become markets.
-* A client document must never share an id with a public one: it would take over its grade and its licensing.
-*/
-function clientFindings(root, client, publicIds) {
-	const folder = path.join(root, "client", client, "findings-v2");
-	if (!existsSync(folder)) return [];
-	return readdirSync(folder).filter((name) => name.endsWith(".json")).sort().map((name) => {
-		const file = path.join(folder, name);
-		const data = readJson$2(file);
-		if (publicIds.has(data.doc.id)) throw new Error(`a client document shares an id with a public one: ${name}`);
-		return {
-			data: {
-				...data,
-				proposals: (data.proposals ?? []).filter((each) => (each.kind ?? "market") === "market")
-			},
-			added: statSync(file).mtime
-		};
-	});
-}
 /** "bags-accessories" → "Bags & accessories": an apparel category as the panel shows it. */
 var categoryTitle = (slug) => {
 	const words = slug.split("-");
@@ -1261,13 +1275,15 @@ function readWorkspace(root, rules = RULES) {
 	const industryOf = new Map(structure.industries.map((each) => [each.slug, each]));
 	const built = path.join(builtMapPath(root), "docs.json");
 	const summaries = existsSync(built) ? readJson$2(built).docs : {};
-	const folder = path.join(landscape, "evidence", "findings");
-	const publicFiles = (existsSync(folder) ? readdirSync(folder) : []).filter((name) => name.endsWith(".json")).sort().map((name) => ({
-		data: readJson$2(path.join(folder, name)),
-		added: statSync(path.join(folder, name)).mtime
+	const found = findingsFiles(root, clientId());
+	const publicFiles = found.publicFiles;
+	const ownFiles = found.ownFiles.map(({ data, added }) => ({
+		data: {
+			...data,
+			proposals: (data.proposals ?? []).filter((each) => (each.kind ?? "market") === "market")
+		},
+		added
 	}));
-	const client = clientId();
-	const ownFiles = client ? clientFindings(root, client, new Set(publicFiles.map(({ data }) => data.doc.id))) : [];
 	const ownIds = new Set(ownFiles.map(({ data }) => data.doc.id));
 	const files = [...publicFiles, ...ownFiles];
 	const kept = files.filter(({ data }) => (settings.height.gradeWeight[data.doc.grade] ?? 0) > 0);
@@ -3979,8 +3995,8 @@ async function publish(note) {
 	const index = path.join(root, "documents", "index.json");
 	if (!existsSync(index)) throw new Error("Fetch the documents first.");
 	if (!readContextFactors(root)) throw new Error("The context factors aren't in this working folder, so the map would show slugs, not their names. Press Fetch latest, then publish.");
-	const findings = path.join(root, "landscape", "evidence", "findings");
-	const documents = JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && existsSync(path.join(findings, `${documentId$1(doc.sha256, doc.confidentiality)}.json`))).map((doc) => doc.sha256);
+	const analysed = analysedIds(root, clientId());
+	const documents = JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(documentId$1(doc.sha256, doc.confidentiality))).map((doc) => doc.sha256);
 	const version = await sendVersion(await signedInCall$1(), {
 		files,
 		documents,
