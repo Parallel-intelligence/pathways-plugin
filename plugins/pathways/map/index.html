@@ -183,6 +183,8 @@
     color:var(--accent);background:none;border:1px solid var(--panel-line);border-radius:999px;padding:4px 10px;cursor:pointer}
   .ramp-default:hover:not(:disabled){border-color:var(--accent)}
   .ramp-default:disabled{color:var(--ink-dim);cursor:default}
+  #btnTheme{display:none!important}   /* no light / dark toggle (12 Nov) */
+  .tab[data-step="uniqueness"][disabled]{opacity:.35;cursor:not-allowed;pointer-events:none}   /* greyed out until uniqueness is scored */
   .ramp-default:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 
@@ -579,15 +581,15 @@
       </div>
       <div class="tabs step-tabs" role="tablist" aria-label="Step">
         <button class="tab" role="tab" data-step="landscape" aria-selected="true" title="The base map defines the industries; the documents fill them. Italic industries are emergent: outside the base map."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg>Landscape</button>
-        <button class="tab" role="tab" data-step="brand" aria-selected="false" title="Where a brand sits: its presence on each industry. Industries the brand is absent from recede."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1"/></svg>Brand</button>
-        <button class="tab" role="tab" data-step="uniqueness" aria-selected="false" title="Where each brand fits: its traits against why people buy, per industry and market. Grey = not scored yet."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .13-5.35 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>Uniqueness</button>
+        <button class="tab" role="tab" data-step="brand" aria-selected="false" title="Where the client is present: how it shows up on each industry. Industries it is absent from recede."><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r="1"/></svg>Presence</button>
+        <button class="tab" role="tab" data-step="uniqueness" aria-selected="false" disabled aria-disabled="true" title="Uniqueness: coming soon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .13-5.35 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>Uniqueness</button>
       </div>
       <div class="tabs subset-tabs" role="tablist" aria-label="Brand" hidden></div>
       <div class="tabs rule-tabs" role="tablist" aria-label="Fit rule" hidden></div>
     </div>
     <div class="topright">
       <div class="controls">
-        <div class="tabs mode-tabs" role="tablist" aria-label="Hills"><button class="tab" role="tab" data-mode="normal" aria-selected="true" title="Height and width from evidence">Normal</button><button class="tab" role="tab" data-mode="performance" aria-selected="false" title="Height from growth a year, base width from market size; colours stay as in Normal">Performance</button></div>
+        <div class="tabs mode-tabs" role="tablist" aria-label="Hills"><button class="tab" role="tab" data-mode="normal" aria-selected="true" title="Height and width from the evidence: how much activity each market has">Activity</button><button class="tab" role="tab" data-mode="performance" aria-selected="false" title="Height from growth a year, base width from market size; colours stay as in Activity">Growth</button></div>
         <button class="ctl" id="btnLibrary" type="button" aria-pressed="false" title="Every document the landscape is built on, as cards">Documents</button>
         <div class="tabs level-tabs" data-pane="both" role="tablist" aria-label="Level">
           <button class="tab" role="tab" data-level="themes" aria-selected="true" title="One peak per industry"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>Industries</button>
@@ -623,7 +625,7 @@
     <button class="cam-btn" id="btnSpin" type="button" aria-pressed="false" aria-label="Auto-orbit" title="Auto-orbit">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
     </button>
-    <button class="cam-btn" id="btnTheme" type="button" aria-pressed="false" aria-label="Light theme" title="Light / dark"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <button class="cam-btn" id="btnTheme" type="button" hidden aria-pressed="false" aria-label="Light theme" title="Light / dark"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
     <button class="cam-btn" id="btnView" type="button" aria-pressed="true" aria-label="Tilt (3D)" title="Tilt: 3D / top-down">3D</button>
     <button class="cam-btn" id="btnNorth" type="button" aria-label="Reset rotation" title="Reset rotation">
       <svg viewBox="0 0 24 24" aria-hidden="true" id="compass"><path class="n" d="M12 3l3.5 9h-7z"/><path d="M12 21l-3.5-9h7z"/></svg>

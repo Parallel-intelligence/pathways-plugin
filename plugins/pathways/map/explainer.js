@@ -218,8 +218,11 @@
       } else if(e.key==="?" && !e.target.closest?.("input,textarea,select")){ open(); }
     }, true);
 
-    // first visit: once the map has finished drawing itself in, offer the explainer (once, until dismissed or used)
-    if(!state.dismissed && !state.visited.length){
+    // first visit: once the map has finished drawing itself in, offer the explainer (once, until dismissed or used),
+    // but not to someone who has just been through the welcome page's walkthrough or chose to skip it
+    // (welcome/welcome.js keeps "guided" or "skipped" for the session)
+    const skipped=(()=>{ try{ return ["guided","skipped"].includes(sessionStorage.getItem("pathways-welcome")); }catch(e){ return false; } })();
+    if(!state.dismissed && !state.visited.length && !skipped){
       const ready=()=>!app.classList.contains("intro") && !app.classList.contains("booting");
       const offer=()=>setTimeout(()=>{ if(xp.hidden) prompt.classList.add("on"); }, 900);
       if(ready()) offer();

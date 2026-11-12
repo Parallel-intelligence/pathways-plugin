@@ -1497,7 +1497,7 @@ var SINGLE_MAX = 99614720;
 var PART_BYTES$1 = 67108864;
 var TEXT_MAX = 20971520;
 var CHARTS_MAX = 5242880;
-var AT_ONCE = 4;
+var AT_ONCE$1 = 4;
 var MANIFEST = ".pathways-library.json";
 var ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
 var SCHEMA = "library/1";
@@ -1937,13 +1937,13 @@ async function uploadLibrary({ root, call, client, licensed, log = () => {}, par
 	let texts = 0;
 	let charts = 0;
 	try {
-		await eachAtOnce$1(toSend, AT_ONCE, async (doc) => {
+		await eachAtOnce$1(toSend, AT_ONCE$1, async (doc) => {
 			await renew();
 			await uploadOne(root, call, doc, partBytes);
 			sent++;
 			if (sent % 25 === 0) log(`  uploaded ${sent} of ${toSend.length}`);
 		});
-		await eachAtOnce$1(manifest.documents.filter((doc) => !skip.has(doc.sha256) && (doc.text && !stored.get(doc.sha256)?.textSha256 || doc.charts && !stored.get(doc.sha256)?.chartsSha256)), AT_ONCE, async (doc) => {
+		await eachAtOnce$1(manifest.documents.filter((doc) => !skip.has(doc.sha256) && (doc.text && !stored.get(doc.sha256)?.textSha256 || doc.charts && !stored.get(doc.sha256)?.chartsSha256)), AT_ONCE$1, async (doc) => {
 			await renew();
 			if (!stored.get(doc.sha256)?.textSha256 && await storeBeside(root, call, doc, "text")) texts++;
 			if (!stored.get(doc.sha256)?.chartsSha256 && await storeBeside(root, call, doc, "charts")) charts++;
@@ -2234,7 +2234,7 @@ var worker = (route, token, init = {}, timeoutMs = 12e4) => fetch(`${ADMIN_URL}$
 	signal: AbortSignal.timeout(timeoutMs)
 });
 /** The Worker's own words when it refuses something ({ error }), or its status. */
-var refusal$1 = async (response) => (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
+var refusal$2 = async (response) => (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
 async function signedInToken() {
 	const token = await accessToken();
 	if (!token || token === "missing") throw new Error("Sign in first.");
@@ -2280,11 +2280,13 @@ async function session() {
 	if (response.ok) {
 		const me = await response.json();
 		const client = typeof me.client === "string" && /^[\p{L}\p{N}][\p{L}\p{N}&.' -]{0,59}$/u.test(me.client) ? me.client : void 0;
+		const role = me.role === "admin" ? "admin" : "member";
 		return {
 			cloudflared: true,
 			signedIn: true,
 			signingIn: false,
 			email: me.email,
+			role,
 			...client ? { client } : {}
 		};
 	}
@@ -2376,7 +2378,7 @@ var isStructure = (value) => {
 async function fetchStructure(token) {
 	const response = await worker(STRUCTURE_RECORD, token);
 	if (response.status === 404) return;
-	if (!response.ok) throw new Error(await refusal$1(response));
+	if (!response.ok) throw new Error(await refusal$2(response));
 	const structure = await response.json();
 	if (!isStructure(structure)) throw new Error("The industries and markets in Cloudflare aren't in the expected shape.");
 	assertOutsideGit(workingFolderPath());
@@ -2421,7 +2423,7 @@ async function fetchSetting(token, record, name, check, what) {
 		rmSync(file, { force: true });
 		return;
 	}
-	if (!response.ok) throw new Error(await refusal$1(response));
+	if (!response.ok) throw new Error(await refusal$2(response));
 	const value = await response.json();
 	if (!check(value)) throw new Error(`${what} in Cloudflare isn't in the expected shape.`);
 	assertOutsideGit(workingFolderPath());
@@ -2490,7 +2492,7 @@ async function pushRecord(record, body) {
 	if (token === "missing") throw new Error("cloudflared isn't set up: type /pathways again, which sets it up.");
 	if (!token) throw new Error(`Sign in first: open the tool with /pathways and sign in, or run \`cloudflared access login ${ADMIN_URL}\` in Terminal, then run this again.`);
 	const current = await worker(record, token);
-	if (current.status !== 404 && !current.ok) throw new Error(await refusal$1(current));
+	if (current.status !== 404 && !current.ok) throw new Error(await refusal$2(current));
 	const etag = current.ok ? current.headers.get("ETag") : null;
 	const { holder, yours } = await (await worker("/v0/checkout", token)).json();
 	if (!yours && holder) throw new Error(`${holder} has the library checked out.`);
@@ -2504,7 +2506,7 @@ async function pushRecord(record, body) {
 			},
 			body
 		});
-		if (!saved.ok) throw new Error(await refusal$1(saved));
+		if (!saved.ok) throw new Error(await refusal$2(saved));
 		return Boolean(etag);
 	} finally {
 		if (!yours) await worker("/v0/checkout", token, { method: "DELETE" });
@@ -2520,12 +2522,12 @@ async function upload(bytes, filename, confidentiality) {
 	const token = await signedInToken();
 	if (!tookCheckout) {
 		const checkout = await worker("/v0/checkout", token);
-		if (!checkout.ok) throw new Error(await refusal$1(checkout));
+		if (!checkout.ok) throw new Error(await refusal$2(checkout));
 		const { holder, yours } = await checkout.json();
 		if (!yours) {
 			if (holder) throw new Error(`${holder} has the library checked out, so nothing can be uploaded until they're done.`);
 			const taken = await worker("/v0/checkout", token, { method: "POST" });
-			if (!taken.ok) throw new Error(await refusal$1(taken));
+			if (!taken.ok) throw new Error(await refusal$2(taken));
 			tookCheckout = true;
 		}
 	}
@@ -2540,7 +2542,7 @@ async function upload(bytes, filename, confidentiality) {
 		},
 		body: new Uint8Array(bytes)
 	});
-	if (!response.ok) throw new Error(await refusal$1(response));
+	if (!response.ok) throw new Error(await refusal$2(response));
 	assertOutsideGit(workingFolderPath());
 	const folder = path.join(workingFolderPath(), "documents");
 	mkdirSync(folder, {
@@ -2640,6 +2642,8 @@ var PART_BYTES = 67108864;
 var BATCH = 1e4;
 var RENEW_MS = 18e5;
 var PULL_AT_ONCE = 8;
+/** Files sent at once by push-dev: small ones only; a file sent in parts goes on its own, so memory stays bounded. */
+var PUSH_AT_ONCE = 8;
 var SKIP = /* @__PURE__ */ new Set([
 	".DS_Store",
 	".git",
@@ -2680,11 +2684,11 @@ function writeNote(root, note) {
 var sum = (files) => files.reduce((total, file) => total + file.bytes, 0);
 var size = (bytes) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(1)} MB`;
 /** The Worker's own words when it refuses something, or its status. */
-async function refusal(response) {
+async function refusal$1(response) {
 	return (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
 }
 async function ok(response) {
-	if (!response.ok) throw new Error(await refusal(response));
+	if (!response.ok) throw new Error(await refusal$1(response));
 	return response;
 }
 var postJson = (call, route, value, headers = {}, timeoutMs) => call(route, {
@@ -2792,8 +2796,8 @@ async function holdingCheckout(call, work) {
 	let renewed = Date.now();
 	const renew = async () => {
 		if (Date.now() - renewed < RENEW_MS) return;
-		await ok(await call("/v0/checkout", { method: "POST" }));
 		renewed = Date.now();
+		await ok(await call("/v0/checkout", { method: "POST" }));
 	};
 	try {
 		return await work(renew);
@@ -2832,12 +2836,14 @@ async function pushDev({ root, call, first = false, log = () => {}, partBytes = 
 		const toSend = unique.filter((file) => missing.has(file.sha256));
 		log(`${toSend.length} files to send (${size(sum(toSend))}); the rest are already in the dev bucket.`);
 		let sent = 0;
-		for (const file of toSend) {
+		const send = async (file) => {
 			await renew();
 			await uploadFile(call, file, partBytes);
 			sent++;
 			if (sent % 100 === 0 || file.bytes > partBytes) log(`  sent ${sent} of ${toSend.length}`);
-		}
+		};
+		await eachAtOnce(toSend.filter((file) => file.bytes <= partBytes), PUSH_AT_ONCE, send);
+		for (const file of toSend.filter((file) => file.bytes > partBytes)) await send(file);
 		const listed = hashed.map(({ path: filePath, sha256, bytes }) => ({
 			path: filePath,
 			sha256,
@@ -3624,10 +3630,9 @@ function analysisHandler(landscapeDir) {
 	};
 }
 //#endregion
-//#region standalone/publish.ts
-var VERSION_FILE = /^(bundle\.json|docs\.json|evidence\/[a-z0-9][a-z0-9-]{0,79}\.json)$/;
-var MAX_BODY = 65536;
-var hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+//#region standalone/versions.ts
+var AT_ONCE = 8;
+var MAX_PROMOTE_ROUNDS = 50;
 var versionNumber = (version) => Number(version.replace(/^v/, ""));
 var versionName = (number) => `v${String(number).padStart(4, "0")}`;
 var jsonBody = (value) => ({
@@ -3635,29 +3640,222 @@ var jsonBody = (value) => ({
 	headers: { "Content-Type": "application/json" },
 	body: JSON.stringify(value)
 });
+/** The Worker's own words when it refuses something ({ error }), or its status. */
+var refusal = async (response) => (await response.json().catch(() => null))?.error ?? `The admin Worker answered ${response.status}.`;
+/** The versions: what's live on staging and for the client, the latest published, any left building, and each published one. */
+async function listVersions(call) {
+	const response = await call("/v0/versions");
+	if (!response.ok) throw new Error(await refusal(response));
+	const { live, liveKind, production, versions } = await response.json();
+	const published = versions.filter((each) => each.status === "published");
+	return {
+		live,
+		liveKind: liveKind ?? null,
+		production: {
+			live: production?.live ?? null,
+			kind: production?.kind ?? null
+		},
+		latest: Math.max(0, ...published.map((each) => versionNumber(each.version))),
+		building: versions.find((each) => each.status === "building")?.version ?? null,
+		published: published.map(({ version, note, publishedBy, publishedAt, productionLive, promotedBy, promotedAt }) => ({
+			version,
+			note,
+			publishedBy,
+			publishedAt,
+			productionLive: Boolean(productionLive),
+			promotedBy: promotedBy ?? null,
+			promotedAt: promotedAt ?? null
+		}))
+	};
+}
+/** Runs `work` holding the library's checkout: taken if it's free, given back after if it was taken here. */
+async function withCheckout(call, action, work) {
+	const checkout = await call("/v0/checkout");
+	if (!checkout.ok) throw new Error(await refusal(checkout));
+	const { holder, yours } = await checkout.json();
+	if (!yours && holder) throw new Error(`${holder} has the library checked out, so nothing can be ${action} until they're done.`);
+	if (!yours) {
+		const taken = await call("/v0/checkout", { method: "POST" });
+		if (!taken.ok) throw new Error(await refusal(taken));
+	}
+	try {
+		return await work();
+	} finally {
+		if (!yours) await call("/v0/checkout", { method: "DELETE" }).catch(() => null);
+	}
+}
+/** The files a version received, by path. */
+async function received(call, version) {
+	const response = await call(`/v0/versions/${version}`);
+	if (!response.ok) throw new Error(await refusal(response));
+	const { files } = await response.json();
+	return new Map(files.map((file) => [file.path, file.sha256]));
+}
+/** Runs each task, at most `limit` at a time, stopping at the first failure. */
+async function inTurn(items, limit, task) {
+	let next = 0;
+	let failed = null;
+	const runner = async () => {
+		while (failed === null && next < items.length) {
+			const item = items[next++];
+			try {
+				await task(item);
+			} catch (error) {
+				failed ??= error;
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runner));
+	if (failed !== null) throw failed;
+}
+/**
+* Publishes the files to staging as a new version, holding the checkout: starts it (or picks up one an earlier try
+* left open, if it holds nothing different), sends the files, then seals it, which makes it live on staging. A version
+* sealed with these very files that never went live is finished instead. Returns the version's name.
+*/
+async function sendVersion(call, { files, documents, note, onProgress = () => {} }) {
+	if (!files.some((file) => file.path === "bundle.json") || !files.some((file) => file.path === "docs.json")) throw new Error("A version needs the map's bundle and its documents.");
+	const same = (got) => got.size === files.length && files.every((file) => got.get(file.path) === file.sha256);
+	return withCheckout(call, "published", async () => {
+		const { live, latest, building } = await listVersions(call);
+		if (latest > 0 && live !== versionName(latest) && same(await received(call, versionName(latest)))) {
+			const finished = await call(`/v0/versions/${versionName(latest)}/seal`, jsonBody({}));
+			if (!finished.ok) throw new Error(await refusal(finished));
+			await mustBeLive(finished);
+			onProgress(files.length, files.length, versionName(latest));
+			return versionName(latest);
+		}
+		let version = null;
+		let have = /* @__PURE__ */ new Map();
+		if (building) {
+			const got = await received(call, building);
+			if ([...got].every(([name, sha256]) => files.some((file) => file.path === name && file.sha256 === sha256))) {
+				version = building;
+				have = got;
+			} else {
+				const abandoned = await call(`/v0/versions/${building}/abandon`, { method: "POST" });
+				if (!abandoned.ok) throw new Error(await refusal(abandoned));
+			}
+		}
+		if (!version) {
+			const started = await call("/v0/versions", jsonBody({
+				baseVersion: latest,
+				note: note.trim() || void 0
+			}));
+			if (!started.ok) throw new Error(await refusal(started));
+			version = (await started.json()).version;
+		}
+		const name = version;
+		let done = have.size;
+		onProgress(done, files.length, name);
+		await inTurn(files.filter((file) => have.get(file.path) !== file.sha256), AT_ONCE, async (file) => {
+			const sent = await call(`/v0/versions/${name}/files/${file.path}`, {
+				method: "PUT",
+				headers: {
+					"Content-Type": file.contentType,
+					"X-Content-SHA256": file.sha256
+				},
+				body: file.bytes
+			});
+			if (!sent.ok) throw new Error(`${file.path}: ${await refusal(sent)}`);
+			onProgress(++done, files.length, name);
+		});
+		const sealed = await call(`/v0/versions/${name}/seal`, jsonBody({
+			files: files.map(({ path, sha256 }) => ({
+				path,
+				sha256
+			})),
+			documents
+		}));
+		if (!sealed.ok) throw new Error(`${await refusal(sealed)}${sealed.status >= 500 ? " Press Publish again to finish." : ""}`);
+		await mustBeLive(sealed);
+		return name;
+	});
+}
+/** A Worker that hasn't been updated wouldn't make the version live on staging: say so, rather than claim it is. */
+async function mustBeLive(sealed) {
+	const { live } = await sealed.json();
+	if (live !== true) throw new Error("Sealed, but the admin Worker didn't make it live on staging: it needs its update deployed.");
+}
+/** Points staging at another published version. */
+async function rollbackStaging(call, version) {
+	if (!/^v\d{4}$/.test(version)) throw new Error("That isn't a version.");
+	return withCheckout(call, "rolled back", async () => {
+		const moved = await call("/v0/live", jsonBody({ version }));
+		if (!moved.ok) throw new Error(await refusal(moved));
+		return await moved.json();
+	});
+}
+/**
+* Sends a published version to the client, holding the checkout. The admin Worker copies it from staging into
+* production, every file checked, then points the client's portal at it; a large version takes a few calls, each
+* answering 202 until every file is there. Only an admin who didn't publish the version can do it the first time.
+*/
+async function promoteVersion(call, version, onProgress = () => {}) {
+	if (!/^v\d{4}$/.test(version)) throw new Error("That isn't a version.");
+	return withCheckout(call, "promoted", async () => {
+		let copied = 0;
+		for (let round = 0; round < MAX_PROMOTE_ROUNDS; round++) {
+			const response = await call(`/v0/versions/${version}/promote`, { method: "POST" });
+			if (response.status === 202) {
+				const progress = await response.json();
+				copied += progress.copied;
+				onProgress(copied, progress.left);
+				continue;
+			}
+			if (!response.ok) throw new Error(await refusal(response));
+			const done = await response.json();
+			onProgress(copied + done.copied, 0);
+			return done;
+		}
+		throw new Error(`${version} is still copying to production. Press Promote again to go on.`);
+	});
+}
+//#endregion
+//#region standalone/publish.ts
+var VERSION_FILE = /^(bundle\.json|docs\.json|growth\.json|presence\.json|similarity\.json|evidence\/[a-z0-9][a-z0-9-]{0,79}\.json|covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg)$/;
+var COVER = /^covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg$/;
+var LAYERS = [
+	"growth.json",
+	"presence.json",
+	"similarity.json"
+];
+var MAX_BODY = 65536;
+var hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 var job = {
 	running: false,
 	done: 0,
 	total: 0
 };
+var promoteJob = {
+	running: false,
+	copied: 0,
+	left: 0
+};
 var isRow = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var rows = (value) => Array.isArray(value) ? value.filter(isRow) : [];
+/** Calls to the admin Worker as the signed-in person. */
+async function signedInCall$1() {
+	const token = await signedInToken();
+	return (route, init) => worker(route, token, init);
+}
 /**
 * The built map's files as the client gets them: without the build's working fields, which the admin Worker refuses
 * (apps/admin/src/checks.js). A market added from evidence is marked `fromEvidence` (the build says `minted`), a
-* licensed document `licensed` (`internal`); archetypes and hidden-passage counts are left out, and so are covers,
-* which a version doesn't carry yet. The map page reads both spellings.
+* licensed document `licensed` (`internal`); archetypes and hidden-passage counts are left out. A document keeps its
+* cover only when the cover's file goes in the version too. The map page reads both spellings.
 */
-function publishedFiles(bundle, docs, evidence) {
+function publishedFiles(bundle, docs, evidence, covers = /* @__PURE__ */ new Set()) {
 	const subthemes = Object.fromEntries(Object.entries(isRow(bundle.subthemes) ? bundle.subthemes : {}).map(([industry, markets]) => [industry, rows(markets).map(({ minted, archetype: _archetype, ...market }) => ({
 		...market,
 		fromEvidence: Boolean(minted)
 	}))]));
 	const documents = Object.fromEntries(Object.entries(isRow(docs.docs) ? docs.docs : {}).map(([id, doc]) => {
 		const { internal, ...rest } = isRow(doc) ? doc : {};
+		const cover = typeof rest.cover === "string" && covers.has(rest.cover) ? rest.cover : null;
 		return [id, {
 			...rest,
-			cover: null,
+			cover,
 			licensed: Boolean(internal)
 		}];
 	}));
@@ -3677,13 +3875,12 @@ function publishedFiles(bundle, docs, evidence) {
 		...Object.fromEntries(shown)
 	};
 }
-/** The map the build last made, from the working folder, ready to publish. */
+/** The map the build last made, from the working folder, ready to publish: its JSON files and its covers' bytes. */
 function builtFiles() {
 	clientId();
 	const root = workingFolder();
 	const where = root ? path.relative(root, builtMapPath(root)) : "landscape/map";
-	const read = (name) => {
-		const bytes = root ? readBuiltMapFile(root, name) : null;
+	const parse = (bytes) => {
 		if (!bytes) return null;
 		try {
 			const value = JSON.parse(bytes.toString("utf8"));
@@ -3692,6 +3889,7 @@ function builtFiles() {
 			return null;
 		}
 	};
+	const read = (name) => root ? parse(readBuiltMapFile(root, name)) : null;
 	const bundle = read("bundle.json");
 	const docs = read("docs.json");
 	if (!root || !bundle || !docs) throw new Error(`There's no built map in the working folder (${where}/). Press Analyse to build it, then publish.`);
@@ -3715,162 +3913,100 @@ function builtFiles() {
 		if (!file) throw new Error(`${where}/evidence/${name} couldn't be read. Press Analyse to build the map again.`);
 		evidence[slug] = file;
 	}
-	return publishedFiles(bundle, docs, evidence);
-}
-async function listVersions(token) {
-	const response = await worker("/v0/versions", token);
-	if (!response.ok) throw new Error(await refusal$1(response));
-	const { live, liveKind, versions } = await response.json();
-	const published = versions.filter((each) => each.status === "published");
+	const layers = {};
+	for (const name of LAYERS) {
+		const bytes = readBuiltMapFile(root, name);
+		if (!bytes) continue;
+		const layer = parse(bytes);
+		if (!layer) throw new Error(`${where}/${name} couldn't be read. Press Analyse to build the map again.`);
+		layers[name] = layer;
+	}
+	const covers = {};
+	for (const doc of Object.values(isRow(docs.docs) ? docs.docs : {})) {
+		const cover = isRow(doc) ? doc.cover : null;
+		if (typeof cover !== "string" || !COVER.test(cover) || covers[cover]) continue;
+		const bytes = readBuiltMapFile(root, cover);
+		if (bytes) covers[cover] = bytes;
+	}
 	return {
-		live,
-		liveKind: liveKind ?? null,
-		latest: Math.max(0, ...published.map((each) => versionNumber(each.version))),
-		building: versions.find((each) => each.status === "building")?.version ?? null,
-		published: published.map(({ version, note, publishedBy, publishedAt }) => ({
-			version,
-			note,
-			publishedBy,
-			publishedAt
-		}))
+		json: {
+			...publishedFiles(bundle, docs, evidence, new Set(Object.keys(covers))),
+			...layers
+		},
+		covers
 	};
 }
-/** The published versions, which one is live and how it got there, for History, Publish and the sidebar. */
+/** The published versions, which one is live on staging and for the client, for History, Publish and the sidebar. */
 async function versionsForPage() {
 	const nothing = {
 		live: null,
 		liveKind: null,
+		production: {
+			live: null,
+			kind: null
+		},
 		latest: null,
 		versions: []
 	};
-	const token = await signedInToken().catch(() => null);
-	if (!token) return nothing;
-	return listVersions(token).then(({ live, liveKind, latest, published }) => ({
+	const call = await signedInCall$1().catch(() => null);
+	if (!call) return nothing;
+	return listVersions(call).then(({ live, liveKind, production, latest, published }) => ({
 		live,
 		liveKind,
+		production,
 		latest,
 		versions: published
 	})).catch(() => nothing);
 }
-/** Runs `work` holding the library's checkout: taken if it's free, given back after if it was taken here. */
-async function withCheckout(token, action, work) {
-	const checkout = await worker("/v0/checkout", token);
-	if (!checkout.ok) throw new Error(await refusal$1(checkout));
-	const { holder, yours } = await checkout.json();
-	if (!yours && holder) throw new Error(`${holder} has the library checked out, so nothing can be ${action} until they're done.`);
-	if (!yours) {
-		const taken = await worker("/v0/checkout", token, { method: "POST" });
-		if (!taken.ok) throw new Error(await refusal$1(taken));
-	}
-	try {
-		return await work();
-	} finally {
-		if (!yours) await worker("/v0/checkout", token, { method: "DELETE" }).catch(() => null);
-	}
-}
-/** Points the live site at an earlier published version. */
-async function rollback(version) {
-	if (!/^v\d{4}$/.test(version)) throw new Error("That isn't a version.");
-	const token = await signedInToken();
-	return withCheckout(token, "rolled back", async () => {
-		const moved = await worker("/v0/live", token, jsonBody({ version }));
-		if (!moved.ok) throw new Error(await refusal$1(moved));
-		return await moved.json();
-	});
-}
-/** The files a version received, by path. */
-async function received(token, version) {
-	const response = await worker(`/v0/versions/${version}`, token);
-	if (!response.ok) throw new Error(await refusal$1(response));
-	const { files } = await response.json();
-	return new Map(files.map((file) => [file.path, file.sha256]));
-}
 async function publish(note) {
-	const files = builtFiles();
-	const entries = Object.entries(files).map(([name, value]) => {
-		if (!VERSION_FILE.test(name)) throw new Error(`${name} isn't a file a version can hold.`);
+	const { json, covers } = builtFiles();
+	const files = [...Object.entries(json).map(([name, value]) => {
 		const bytes = Buffer.from(JSON.stringify(value));
 		return {
 			path: name,
 			bytes,
-			sha256: hash(bytes)
+			sha256: hash(bytes),
+			contentType: "application/json"
 		};
-	});
-	if (!entries.some((entry) => entry.path === "bundle.json") || !entries.some((entry) => entry.path === "docs.json")) throw new Error("A version needs the map's bundle and its documents.");
-	const same = (got) => got.size === entries.length && entries.every((entry) => got.get(entry.path) === entry.sha256);
+	}), ...Object.entries(covers).map(([name, bytes]) => ({
+		path: name,
+		bytes,
+		sha256: hash(bytes),
+		contentType: "image/jpeg"
+	}))];
+	for (const file of files) if (!VERSION_FILE.test(file.path)) throw new Error(`${file.path} isn't a file a version can hold.`);
 	const root = workingFolderPath();
 	const index = path.join(root, "documents", "index.json");
 	if (!existsSync(index)) throw new Error("Fetch the documents first.");
 	if (!readContextFactors(root)) throw new Error("The context factors aren't in this working folder, so the map would show slugs, not their names. Press Fetch latest, then publish.");
 	const findings = path.join(root, "landscape", "evidence", "findings");
 	const documents = JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && existsSync(path.join(findings, `${documentId$1(doc.sha256, doc.confidentiality)}.json`))).map((doc) => doc.sha256);
-	const token = await signedInToken();
-	await withCheckout(token, "published", async () => {
-		const { live, latest, building } = await listVersions(token);
-		if (latest > 0 && live !== versionName(latest) && same(await received(token, versionName(latest)))) {
-			const finished = await worker(`/v0/versions/${versionName(latest)}/seal`, token, jsonBody({}));
-			if (!finished.ok) throw new Error(await refusal$1(finished));
-			await mustBeLive(finished);
-			job = {
-				...job,
-				done: entries.length,
-				total: entries.length,
-				version: versionName(latest)
-			};
-			return;
-		}
-		let version = null;
-		if (building) {
-			if ([...await received(token, building)].every(([name, sha256]) => entries.some((entry) => entry.path === name && entry.sha256 === sha256))) version = building;
-			else {
-				const abandoned = await worker(`/v0/versions/${building}/abandon`, token, { method: "POST" });
-				if (!abandoned.ok) throw new Error(await refusal$1(abandoned));
-			}
-		}
-		if (!version) {
-			const started = await worker("/v0/versions", token, jsonBody({
-				baseVersion: latest,
-				note: note.trim() || void 0
-			}));
-			if (!started.ok) throw new Error(await refusal$1(started));
-			version = (await started.json()).version;
-		}
-		job = {
+	const version = await sendVersion(await signedInCall$1(), {
+		files,
+		documents,
+		note,
+		onProgress: (done, total, name) => job = {
 			...job,
-			total: entries.length,
-			done: 0,
-			version
-		};
-		for (const entry of entries) {
-			const sent = await worker(`/v0/versions/${version}/files/${entry.path}`, token, {
-				method: "PUT",
-				headers: {
-					"Content-Type": "application/json",
-					"X-Content-SHA256": entry.sha256
-				},
-				body: new Uint8Array(entry.bytes)
-			});
-			if (!sent.ok) throw new Error(await refusal$1(sent));
-			job = {
-				...job,
-				done: job.done + 1
-			};
+			done,
+			total,
+			version: name
 		}
-		const sealed = await worker(`/v0/versions/${version}/seal`, token, jsonBody({
-			files: entries.map(({ path: name, sha256 }) => ({
-				path: name,
-				sha256
-			})),
-			documents
-		}));
-		if (!sealed.ok) throw new Error(`${await refusal$1(sealed)}${sealed.status >= 500 ? " Press Publish again to finish." : ""}`);
-		await mustBeLive(sealed);
 	});
+	job = {
+		...job,
+		version
+	};
 }
-/** A Worker from before direct publishing seals into staging only: say so, rather than claim it's live. */
-async function mustBeLive(sealed) {
-	const { live } = await sealed.json();
-	if (live !== true) throw new Error("Sealed, but the admin Worker doesn't publish yet: it needs its update deployed. Nothing changed on the live site.");
+async function promote(version) {
+	const result = await promoteVersion(await signedInCall$1(), version, (copied, left) => promoteJob = {
+		...promoteJob,
+		copied,
+		left
+	});
+	promoteJob = {
+		...promoteJob,
+		kind: result.kind
+	};
 }
 function readJson(req) {
 	return new Promise((resolve, reject) => {
@@ -3901,23 +4037,59 @@ var json = (res, status, value) => {
 	});
 	res.end(JSON.stringify(value));
 };
-/** /api/versions, /api/publish (start, and how it's going) and /api/rollback. Changes only from the tool's own page. */
+/** /api/versions, /api/publish and /api/promote (start, and how it's going) and /api/rollback. Changes only from the tool's own page. */
 function publishHandler() {
+	const ROUTES = /* @__PURE__ */ new Set([
+		"/api/versions",
+		"/api/publish",
+		"/api/rollback",
+		"/api/promote"
+	]);
 	return (req, res, next) => {
 		const route = (req.url ?? "").split("?")[0];
-		if (route !== "/api/versions" && route !== "/api/publish" && route !== "/api/rollback") return next();
-		if (req.method === "GET" && route !== "/api/rollback") return route === "/api/versions" ? void versionsForPage().then((value) => json(res, 200, value)) : json(res, 200, job);
+		if (!ROUTES.has(route)) return next();
+		if (req.method === "GET" && route !== "/api/rollback") {
+			if (route === "/api/versions") return void versionsForPage().then((value) => json(res, 200, value));
+			return json(res, 200, route === "/api/promote" ? promoteJob : job);
+		}
 		if (req.method !== "POST" || route === "/api/versions") return json(res, 405, { error: "Method not allowed" });
 		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json(res, 403, { error: "Forbidden" });
+		const busy = job.running ? "Publishing is under way" : promoteJob.running ? "Promoting is under way" : null;
 		if (route === "/api/rollback") {
-			if (job.running) return json(res, 409, { error: "Publishing is under way: roll back once it's done." });
-			readJson(req).then((body) => rollback(String(body.version ?? ""))).then((value) => json(res, 200, value)).catch((error) => {
+			if (busy) return json(res, 409, { error: `${busy}: roll back once it's done.` });
+			readJson(req).then(async (body) => rollbackStaging(await signedInCall$1(), String(body.version ?? ""))).then((value) => json(res, 200, value)).catch((error) => {
 				console.error(`[rollback] ${error.message}`);
 				json(res, 400, { error: error.message });
 			});
 			return;
 		}
-		if (job.running) return json(res, 409, { error: "Already publishing." });
+		if (busy) return json(res, 409, { error: `${busy}: try again once it's done.` });
+		if (route === "/api/promote") {
+			promoteJob = {
+				running: true,
+				copied: 0,
+				left: 0
+			};
+			readJson(req).then((body) => {
+				const version = String(body?.version ?? "");
+				promoteJob = {
+					...promoteJob,
+					version
+				};
+				return promote(version);
+			}).then(() => promoteJob = {
+				...promoteJob,
+				running: false
+			}).catch((error) => {
+				console.error(`[promote] ${error.message}`);
+				promoteJob = {
+					...promoteJob,
+					running: false,
+					error: error.message
+				};
+			});
+			return json(res, 202, promoteJob);
+		}
 		job = {
 			running: true,
 			done: 0,
@@ -4183,7 +4355,7 @@ async function legacyPort() {
 /** What busyWith says of a tool that didn't answer clearly. */
 var UNSAID = "something it didn't say";
 /** The fix when a running tool can't say whether it's busy: the person decides, since stopping it would cut that off. */
-var STOP_FIRST = "If it isn't in the middle of Analyse, Fetch latest or publishing, type stop Pathways, then /pathways again.";
+var STOP_FIRST = "If it isn't in the middle of Analyse, Fetch latest, publishing or promoting, type stop Pathways, then /pathways again.";
 /**
 * What this person's running tool is in the middle of, if anything: stopping it now would cut that off. Only a
 * clear "not running" counts as idle; an error or a reply that doesn't say counts as busy.
@@ -4192,7 +4364,8 @@ async function busyWith() {
 	for (const [route, what] of [
 		["/api/analyse", "Analyse"],
 		["/api/fetch", "Fetch latest"],
-		["/api/publish", "publishing"]
+		["/api/publish", "publishing"],
+		["/api/promote", "promoting"]
 	]) try {
 		const response = await ask(route);
 		if (response.status === 404) continue;

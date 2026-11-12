@@ -31,39 +31,34 @@
   #fx,#marks{position:absolute;inset:0;pointer-events:none;overflow:hidden}
   #marks{width:100%;height:100%}
 
-  /* labels: the map's pills, anchored at the dot on the peak */
+  /* labels: block caps, like the tags, standing on a thin line down to the top of what they name; the label's foot
+     is that point */
   .label{position:absolute;left:0;top:0;transform:translate(-50%,-100%);white-space:nowrap;
-    display:flex;flex-direction:column;align-items:center;gap:3px;padding:2px 4px 3px;transition:opacity .5s}
-  .label .txt{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em;color:var(--label-ink);
-    text-shadow:0 0 3px var(--ground),0 0 1px var(--ground);padding:4px 11px;border-radius:999px;transition:all .4s}
-  .label .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);transition:transform .45s cubic-bezier(.3,1.6,.5,1)}
-  .label.emergent .txt{font-style:italic}
-  .label.emergent .dot{width:8px;height:7px;border-radius:0;clip-path:polygon(50% 0,100% 100%,0 100%)}
-  .label.small .dot{width:5px;height:5px}
-  .label.lozenge .txt{border:1px solid var(--panel-line);color:var(--ink-dim);text-shadow:none;letter-spacing:.08em;text-transform:uppercase;font-size:10px}
-  .label.lozenge .dot{display:none}
-  .label.active .txt{background:var(--label-ink);color:var(--on-accent);text-shadow:none;font-weight:600}
+    display:flex;flex-direction:column;align-items:center;gap:6px;transition:opacity .5s}
+  .label .txt{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--label-ink);
+    text-shadow:0 0 4px var(--ground),0 0 2px var(--ground)}
+  .label .stem{width:1px;height:30px;background:var(--label-ink);opacity:.55;transform-origin:50% 100%;transition:transform .5s cubic-bezier(.2,.7,.2,1)}
   .label.hidden{opacity:0}
-  .label.hidden .dot{transform:scale(0)}
+  .label.hidden .stem{transform:scaleY(0)}
   .tag{position:absolute;left:0;top:0;transform:translate(-50%,-50%);font-family:var(--mono);font-size:11px;font-weight:600;
     letter-spacing:.12em;text-transform:uppercase;color:var(--ink);text-shadow:0 0 4px var(--ground),0 0 2px var(--ground);
     white-space:nowrap;transition:opacity .5s;text-align:center;line-height:1.5}
   .tag small{display:block;font-weight:400;letter-spacing:.04em;text-transform:none;color:var(--ink-dim);font-size:11px}
   .tag.hidden{opacity:0}
-  /* a document marker: the map's doc hub, a solid dot carrying a document icon */
-  .hub{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;display:grid;place-items:center;
-    background:var(--label-ink);color:var(--ground);box-shadow:0 0 0 4px color-mix(in srgb, var(--label-ink) 22%, transparent);transition:opacity .4s,transform .4s}
-  .hub svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-  .hub.hidden{opacity:0;transform:scale(.4)}
-  .spark{position:absolute;left:0;top:0;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:var(--accent);
-    box-shadow:0 0 8px color-mix(in srgb, var(--accent) 80%, transparent)}
 
   /* caption: few words, top left, like the map's chrome */
   .caption{position:absolute;left:28px;top:24px;max-width:min(560px,calc(100vw - 56px));pointer-events:none}
   .caption .step{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);margin-bottom:10px}
-  .caption .line{font-size:clamp(20px,3vw,28px);font-weight:600;line-height:1.2;letter-spacing:-.01em;transition:opacity .35s,transform .35s;
+  .caption .line{font-size:clamp(18px,2.4vw,22px);font-weight:600;line-height:1.2;letter-spacing:-.01em;transition:opacity .35s,transform .35s;
     text-shadow:0 0 12px var(--ground)}
   .caption .line.out{opacity:0;transform:translateY(-6px)}
+  /* a step's later line added under the first (sayMore): the first dims back, the new one opens and fades up */
+  .caption .hl{color:var(--peak,#cef585)}
+  .caption .para{display:block;transition:opacity .5s}
+  .caption .para.more{box-sizing:border-box;padding-top:.6em;overflow:hidden;opacity:0;transition:height .6s cubic-bezier(.2,.7,.2,1),padding-top .6s cubic-bezier(.2,.7,.2,1),opacity .5s .15s}
+  .caption .para.more.in{opacity:1}
+  .caption .para.back,.caption .para.more.in.back{opacity:.4}
+  @media (prefers-reduced-motion:reduce){ .caption .para,.caption .para.more{transition:none} }
   .caption .note{margin-top:8px;font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--ink-dim);transition:opacity .4s}
 
   /* the map's tabs, used for the level switch mock and the player */
@@ -73,6 +68,13 @@
   .tab[aria-selected="true"]{background:var(--accent);color:var(--on-accent)}
   .mock{position:absolute;right:28px;top:24px;pointer-events:none;transition:opacity .4s}
   .mock.hidden{opacity:0}
+  /* Two views, once its toggle shows: the toggle's tabs and the paragraphs switch between the views (choose()) */
+  .choosing .mock:not(.hidden){pointer-events:auto}
+  .choosing .mock .tab[aria-selected="false"]:hover{color:var(--accent)}
+  .choosing .caption .para{pointer-events:auto}
+  .choosing .caption .para.back{cursor:pointer}
+  .choosing .caption .para.back:hover,.choosing .caption .para.more.in.back:hover{opacity:.72}
+  .choosing .mock .tab:focus-visible,.choosing .caption .para:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
   @media (max-width:600px){ .mock{top:auto;bottom:72px;right:50%;transform:translateX(50%)} }   /* clear of the caption on a phone */
 
   .player{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);display:flex;align-items:center;gap:8px}
