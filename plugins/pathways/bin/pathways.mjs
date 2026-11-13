@@ -2433,6 +2433,23 @@ function findingsByDoc(folder) {
 	}
 	return byDoc;
 }
+/**
+* The document ids with findings in the client's own pipeline: the configured client's, or, with no client id, any
+* client's folder under client/, so a document filed there is never taken for a public one (13 Nov 2026).
+*/
+function clientFindingsIds(root, client) {
+	if (client) return new Set(findingsByDoc(folders(root, "client", client).findings).keys());
+	const dir = path.join(root, "client");
+	if (!isDir(dir)) return /* @__PURE__ */ new Set();
+	return new Set(readdirSync(dir).filter((name) => CLIENT_ID.test(name)).flatMap((name) => [...findingsByDoc(folders(root, "client", name).findings).keys()]));
+}
+/**
+* A document's id in the tool. One Cloudflare labels public or licensed but whose findings sit in the client's own
+* pipeline (`clientIds`, from clientFindingsIds) is the client's: the handover filed it there, the client's map counts
+* it, and reading it again as public would put the client's material in the base map (13 Nov 2026).
+*/
+var filedAsClient = (doc, clientIds) => doc.confidentiality !== "client" && clientIds.has(documentId(doc.sha256, "client"));
+var idInTool = (doc, clientIds) => documentId(doc.sha256, filedAsClient(doc, clientIds) ? "client" : doc.confidentiality);
 /** Ids a pipeline's text.json records as unreadable. */
 var unreadableIn = (file) => new Set(Object.entries(readJson$2(file, {})).filter(([, entry]) => entry?.unreadable).map(([id]) => id));
 /** documents/index.json's list (written by Fetch latest), or none before the first fetch. */
@@ -2443,10 +2460,11 @@ function indexDocuments(root) {
 /**
 * What the client's own documents left in the public evidence (Analyse before 13 Nov filed them there): public
 * findings files whose doc.id is a client document's, and public text files named by one. They're removed, and the
-* base map built again without them.
+* base map built again without them. The client's own include those filed as the client's (filedAsClient), under
+* either id their label could have given them in the public pipeline.
 */
-function misfiled(root, documents, publicFiles = findingsByDoc(folders(root, "public", null).findings)) {
-	const clientIds = new Set(documents.filter((doc) => doc.confidentiality === "client").map((doc) => documentId(doc.sha256, doc.confidentiality)));
+function misfiled(root, documents, publicFiles = findingsByDoc(folders(root, "public", null).findings), ownIds = clientFindingsIds(root, null)) {
+	const clientIds = new Set(documents.filter((doc) => doc.confidentiality === "client" || filedAsClient(doc, ownIds)).flatMap((doc) => [documentId(doc.sha256, "client"), documentId(doc.sha256, doc.confidentiality)]));
 	const pub = folders(root, "public", null);
 	const listed = /* @__PURE__ */ new Set([
 		...readJson$2(pub.docsList, []).map((entry) => String(entry?.id)),
@@ -2472,12 +2490,13 @@ function planRun(root, client, documents, everything = false) {
 	if (client !== null && !CLIENT_ID.test(client)) throw new Error("A client id is lowercase letters, digits and dashes.");
 	const publicFiles = findingsByDoc(folders(root, "public", null).findings);
 	const clientFiles = client ? findingsByDoc(folders(root, "client", client).findings) : /* @__PURE__ */ new Map();
+	const ownIds = client ? new Set(clientFiles.keys()) : clientFindingsIds(root, null);
 	const unreadable = {
 		public: unreadableIn(folders(root, "public", null).textList),
 		client: client ? unreadableIn(folders(root, "client", client).textList) : /* @__PURE__ */ new Set()
 	};
 	const toolRead = new Set(client ? readJson$2(folders(root, "client", client).docsList, []).filter((entry) => entry?.readBy === READ_BY_TOOL).map((entry) => String(entry.id)) : []);
-	const left = misfiled(root, documents, publicFiles);
+	const left = misfiled(root, documents, publicFiles, ownIds);
 	const plan = {
 		read: [],
 		pending: [],
@@ -2494,8 +2513,9 @@ function planRun(root, client, documents, everything = false) {
 	};
 	for (const doc of documents) {
 		if (!SHA256.test(doc.sha256)) throw new Error("The document list wasn't in the expected shape: fetch the latest, then try again.");
-		const id = documentId(doc.sha256, doc.confidentiality);
-		const route = routeOf(doc.confidentiality);
+		const asClient = filedAsClient(doc, ownIds);
+		const id = idInTool(doc, ownIds);
+		const route = asClient ? "client" : routeOf(doc.confidentiality);
 		const planned = route ? {
 			id,
 			route,
@@ -3018,7 +3038,8 @@ async function prepareTexts({ root, client, read, call, convert = pagesOf, macos
 	const queues = Object.fromEntries(routes.map((route) => [route, readJson$2(folders(root, route, client).uploads, {})]));
 	const items = routes.flatMap((route) => Object.entries(queues[route]).flatMap(([id, entry]) => {
 		const file = path.join(folders(root, route, client).text, `${id}.txt`);
-		return entry && SHA256.test(entry.sha256) && typeof entry.confidentiality === "string" && documentId(entry.sha256, entry.confidentiality) === id && isFile(file) && sha256Of(readFileSync(file)) === entry.textSha256 ? [{
+		const idOk = (sha256, confidentiality) => documentId(sha256, confidentiality) === id || route === "client" && documentId(sha256, "client") === id;
+		return entry && SHA256.test(entry.sha256) && typeof entry.confidentiality === "string" && idOk(entry.sha256, entry.confidentiality) && isFile(file) && sha256Of(readFileSync(file)) === entry.textSha256 ? [{
 			id,
 			sha256: entry.sha256,
 			converter: entry.converter,
@@ -3582,6 +3603,15 @@ function fetched(root) {
 		fetchedAt
 	};
 }
+/**
+* Each fetched document's client id, by the id its label gives it: a document labelled public or licensed whose
+* findings sit in the client's own pipeline goes by its client id, as Analyse and Publish take it
+* (standalone/incremental.ts filedAsClient).
+*/
+function clientIdsByLabelId(root) {
+	const { documents } = readJson$1(path.join(root, "documents", "index.json"));
+	return new Map(documents.map((doc) => [documentId(doc.sha256, doc.confidentiality), documentId(doc.sha256, "client")]));
+}
 var WORDS_PER_PAGE = 100;
 /** What Analyse would do now, for its buttons; left out (the page then goes by the documents) if it can't be worked out. */
 function analysisOf(root) {
@@ -3687,29 +3717,37 @@ function readWorkspace(root, rules = RULES) {
 	const withSignals = (id) => signalsOf.has(id) ? { newMarkets: signalsOf.get(id) } : {};
 	const read = new Map(files.map(({ data }) => [data.doc.id, data.doc]));
 	const noteFor = readNotes(root, read);
+	const clientIdOf = index ? clientIdsByLabelId(root) : /* @__PURE__ */ new Map();
 	const documents = index?.documents.map((doc) => {
-		const found = read.get(doc.id);
-		const readNote = noteFor(doc.id);
-		const level = !ownIds.has(doc.id) && internal(doc.id) ? {
+		const asClient = clientIdOf.get(doc.id);
+		const filed = doc.confidentiality !== "client" && asClient !== void 0 && ownIds.has(asClient);
+		const id = filed ? asClient : doc.id;
+		const found = read.get(id);
+		const readNote = noteFor(id);
+		const byRule = !ownIds.has(id) && internal(id);
+		const level = filed ? { confidentiality: "client" } : byRule ? {
 			confidentiality: "licensed",
 			licensedByRule: true
 		} : {};
 		if (!found) return readNote ? {
 			...doc,
+			id,
 			...level,
 			readNote
 		} : {
 			...doc,
+			id,
 			...level
 		};
 		return {
 			...doc,
+			id,
 			...level,
 			status: doc.version !== null ? "published" : "extracted",
 			grade: found.grade === "weak" ? "weak" : "keep",
 			year: found.year || 0,
 			readNote,
-			...withSignals(doc.id)
+			...withSignals(id)
 		};
 	}) ?? kept.map(({ data: { doc }, added }) => ({
 		id: doc.id,
@@ -4139,7 +4177,7 @@ var AT_ONCE = 8;
 * (workspace.ts assertOutsideGit) checks the folder before the list is written, as Fetch latest does.
 */
 async function setArchived({ root, call, ids, archived, outsideGit }) {
-	const byId = new Map((await documentList(call)).map((doc) => [documentId(doc.sha256, doc.confidentiality), doc]));
+	const byId = new Map((await documentList(call)).flatMap((doc) => [[documentId(doc.sha256, doc.confidentiality), doc], [documentId(doc.sha256, "client"), doc]]));
 	const targets = [...new Set(ids)].map((id) => byId.get(id));
 	if (targets.some((doc) => !doc)) throw new Error("Some of those documents aren't in Cloudflare's list, so nothing was changed. Press Fetch latest, then try again.");
 	const chosen = targets;
@@ -5633,7 +5671,8 @@ async function publish(note) {
 	if (!existsSync(index)) throw new Error("Fetch the documents first.");
 	if (!readContextFactors(root)) throw new Error("The context factors aren't in this working folder, so the map would show slugs, not their names. Press Fetch latest, then publish.");
 	const analysed = analysedIds(root, client);
-	const documents = JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(documentId(doc.sha256, doc.confidentiality))).map((doc) => doc.sha256);
+	const ownIds = clientFindingsIds(root, client);
+	const documents = JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(idInTool(doc, ownIds))).map((doc) => doc.sha256);
 	const version = await sendVersion(await signedInCall(), {
 		files,
 		documents,
