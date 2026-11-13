@@ -962,6 +962,14 @@ var analysedIds = (root, client) => {
 	const { publicFiles, ownFiles } = findingsFiles(root, client);
 	return new Set([...publicFiles, ...ownFiles].map(({ data }) => data.doc.id));
 };
+/** What the public pipeline may read: public and licensed documents (licensed ones are shown since 10 Nov). */
+var PUBLIC_PIPELINE = /* @__PURE__ */ new Set(["public", "licensed"]);
+/**
+* How many of the documents a run would read can't go through the public pipeline: the client's own, which belong in
+* the client's (client/<client>/), and anything with a level this tool doesn't know, refused until it does. The public
+* pipeline's findings feed the map built for anyone.
+*/
+var documentsPublicPipelineRefuses = (documents) => documents.filter((doc) => !doc.archivedAt && !PUBLIC_PIPELINE.has(doc.confidentiality)).length;
 //#endregion
 //#region workspace.ts
 var RULES = path.resolve(import.meta.dirname, "../../packages/landscape/rules");
@@ -2197,6 +2205,26 @@ function findClaude() {
 	].find(executable) ?? null;
 }
 //#endregion
+//#region standalone/portals.ts
+/** Each portal's address as an https origin, or left out. */
+function portalLinks(value) {
+	const origin = (raw) => {
+		if (typeof raw !== "string") return void 0;
+		try {
+			const url = new URL(raw);
+			return url.protocol === "https:" && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash ? url.origin : void 0;
+		} catch {
+			return;
+		}
+	};
+	const given = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+	const links = {
+		staging: origin(given.staging),
+		production: origin(given.production)
+	};
+	return links.staging || links.production ? links : void 0;
+}
+//#endregion
 //#region standalone/cloudflare.ts
 var OUR_WORKER = "https://pathways-admin.parallel-pathways.workers.dev";
 var ADMIN_URL = adminUrl(process.env.PATHWAYS_ADMIN_URL);
@@ -2297,13 +2325,15 @@ async function session() {
 		const me = await response.json();
 		const client = typeof me.client === "string" && /^[\p{L}\p{N}][\p{L}\p{N}&.' -]{0,59}$/u.test(me.client) ? me.client : void 0;
 		const role = me.role === "admin" ? "admin" : "member";
+		const portals = portalLinks(me.portals);
 		return {
 			cloudflared: true,
 			signedIn: true,
 			signingIn: false,
 			email: me.email,
 			role,
-			...client ? { client } : {}
+			...client ? { client } : {},
+			...portals ? { portals } : {}
 		};
 	}
 	if (response.status >= 300 && response.status < 400) return {
@@ -3347,6 +3377,9 @@ async function analyse(landscapeDir) {
 	await ensureStructure().catch(() => null);
 	if (!existsSync(path.join(landscape, "structure.json")) || !existsSync(path.join(evidence, "taxonomy.txt"))) throw new Error("There are no industries and markets in Cloudflare to sort findings into yet. An admin saves them with `pathways push-structure`, then press Analyse again.");
 	if (!readContextFactors(root)) throw new Error("The context factors aren't in Cloudflare yet, so findings can't be sorted. An admin saves them with `pathways push-factors`, then press Fetch latest and Analyse again.");
+	const { documents } = JSON.parse(readFileSync(index, "utf8"));
+	const refused = documentsPublicPipelineRefuses(documents);
+	if (refused > 0) throw new Error(`${refused === 1 ? "1 document is" : `${refused} documents are`} the client's own, and Analyse can't read those into the client's map yet: it would file them with the public evidence. An update to the tool fixes this. Until then, the map keeps the findings it has.`);
 	const claudeCommand = findClaude();
 	if (!claudeCommand) throw new Error("Claude Code isn't on this Mac. Install the Claude desktop app from claude.ai/download, sign in, then press Analyse again.");
 	const settings = JSON.parse(readFileSync(path.join(landscapeDir, "rules", "settings.json"), "utf8"));
@@ -3396,7 +3429,6 @@ async function analyse(landscapeDir) {
 		flag: "wx"
 	});
 	cpSync(path.join(landscape, "context-factors.json"), path.join(evidence, "context-factors.json"));
-	const { documents } = JSON.parse(readFileSync(index, "utf8"));
 	const docs = [];
 	const lines = [];
 	const text = {};
@@ -3952,7 +3984,7 @@ function builtFiles() {
 		covers
 	};
 }
-/** The published versions, which one is live on staging and for the client, for History, Publish and the sidebar. */
+/** The published versions, which one is live on staging and for the client, for Versions, Publish and the sidebar. */
 async function versionsForPage() {
 	const nothing = {
 		live: null,
