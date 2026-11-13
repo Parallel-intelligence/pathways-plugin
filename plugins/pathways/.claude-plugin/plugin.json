@@ -1,6 +1,6 @@
 {
   "name": "pathways",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "Open the Pathways tool on this laptop with /pathways: a standalone copy, with its working folder in Downloads.",
   "author": { "name": "Parallel" }
 }
