@@ -8,10 +8,16 @@ excerpt against client/<client>/parts/<doc>.pNN.txt, and writes client/<client>/
   shaping    enablers and context
   brand      presence, uniqueness, project and customer findings: the client layers, never height
 Market evidence keeps the per-document limits in settings.json; presence keeps at most 3 per peak.
+PATHWAYS_MERGE_IDS (comma-separated docs-v2.json ids), when set, limits the merge to those documents, and each only
+once every part is read: Analyse sets it to the documents its run read in full, so earlier findings-v2 files (the
+handover's among them) are never written over from older part outputs. A part output whose doc.id isn't the
+document it's filed under (its id or alias), or that isn't a JSON object with a doc block, is never merged into it:
+it's left out, as if missing, and reported.
 
     PATHWAYS_CLIENT=<client> python3 -I packages/landscape/build.py <working-folder> client-merge
 """
 import json
+import os
 import re
 from collections import Counter, defaultdict
 
@@ -41,6 +47,16 @@ def norm(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
+def part_output(path, ids):
+    """A part output, if it's the document it's filed under (its doc.id one of `ids`), else None."""
+    try:
+        out = json.loads(path.read_text())
+    except ValueError:
+        return None
+    ok = isinstance(out, dict) and isinstance(out.get("doc"), dict) and out["doc"].get("id") in ids and isinstance(out.get("findings"), list)
+    return out if ok else None
+
+
 def limited(items, cap_for):
     """Strongest verified first, up to the cap per peak. A product category on an industry counts
     as its own peak, as a market would (it stands in for markets the structure doesn't have yet).
@@ -55,21 +71,32 @@ def limited(items, cap_for):
 
 
 docs = json.loads((BASE / "docs-v2.json").read_text())
+ONLY = os.environ.get("PATHWAYS_MERGE_IDS")
+if ONLY is not None:
+    wanted = {each for each in ONLY.split(",") if each}
+    docs = [d for d in docs if d["id"] in wanted]
 out_dir = inside(BASE / "findings-v2")
 written = set()
 out_dir.mkdir(exist_ok=True)
 report = []
 for d in docs:
-    parts = sorted(BASE.glob(f"parts-out/{safe_name(d['id'])}.p*.json"))
+    outs, refused = [], []
+    for path in sorted(BASE.glob(f"parts-out/{safe_name(d['id'])}.p*.json")):
+        out = part_output(path, {d["id"], d.get("alias")} - {None})
+        (outs if out is not None else refused).append((path, out))
+    if refused:
+        report.append((d["id"], f"REFUSED part outputs not filed for this document: {', '.join(path.name for path, _ in refused)}"))
+    parts = [path for path, _ in outs]
     if not parts:
         continue
     if len(parts) < d["parts"]:
         report.append((d["id"], f"MISSING parts {len(parts)}/{d['parts']}"))
+        if ONLY is not None:  # a limited merge writes no findings from part of a document
+            continue
     grades, docblock = [], None
     market, presence, proposals, shaping, brand = [], [], [], [], []
     checked = verified = 0
-    for path in parts:
-        out = json.loads(path.read_text())
+    for path, out in outs:
         docblock = docblock or out["doc"]
         grades.append(out["doc"].get("grade", "weak"))
         source = norm((BASE / "parts" / (path.stem + ".txt")).read_text(errors="ignore"))

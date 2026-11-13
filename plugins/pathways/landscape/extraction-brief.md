@@ -1,6 +1,6 @@
 # Evidence extraction brief v3 (landscape v2)
 
-Brief v3, 27 Oct 2026. It combines the earlier prototype's v2 extraction with ours. The rules behind it are in `packages/landscape/rules/rules.md` in the repo. Paths starting `landscape/` are in the working folder.
+Brief v3, 27 Oct 2026. It combines the earlier prototype's v2 extraction with ours. The rules behind it are in `packages/landscape/rules/rules.md` in the repo. Your prompt names every file you read and write, all in the working folder.
 
 You read **one part** of one research document, every line of it, and record the evidence it gives about the wellness landscape. Don't skim and don't search instead of reading. Long documents are already cut into parts, and each part gets read in full.
 
@@ -8,9 +8,9 @@ You read **one part** of one research document, every line of it, and record the
 
 ## Inputs
 
-- **Your part:** `landscape/evidence/parts/<doc-id>.pNN.txt`. It is converted from PDF/HTML, so expect broken layout, headers, footers and interleaved columns.
-- **Taxonomy:** `landscape/evidence/taxonomy.txt`. Lines are `INDUSTRY slug | title | definition` and `MARKET slug | title | definition`. Use only these slugs.
-- **Context factors:** `landscape/evidence/context-factors.json`, a list of slugs.
+- **Your part:** the part file your prompt names (`<doc-id>.pNN.txt`). It is converted from PDF/HTML, so expect broken layout, headers, footers and interleaved columns.
+- **Taxonomy:** the taxonomy file your prompt names (`taxonomy.txt`). Lines are `INDUSTRY slug | title | definition` and `MARKET slug | title | definition`. Use only these slugs.
+- **Context factors:** the context factors file your prompt names (`context-factors.json`), a list of slugs.
 - **Model v2 motivations:** Compete, Connect, Care, Express, Relief, Play, Growth.
 
 ## Record three kinds of finding
@@ -65,7 +65,7 @@ This goes in the `doc` block. Give the grade the whole document deserves, from w
 
 ## Output
 
-Write `landscape/evidence/parts-out/<doc-id>.pNN.json`:
+Write the output file your prompt names (`<doc-id>.pNN.json`), and no other:
 
 ```json
 {

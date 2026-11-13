@@ -7,10 +7,15 @@ Reads landscape/evidence/parts-out/<doc>.pNN.json, writes landscape/evidence/fin
 - Market evidence is limited per document (settings mention.maxPerMarketPerDocument /
   maxPerIndustryPerDocument): the strongest verified findings are kept.
 - Grade: a demand survey keeps its source grade; otherwise the grade most parts gave (a tie goes to the better).
+- PATHWAYS_MERGE_IDS (comma-separated document ids), when set, limits the merge to those documents, and each only
+  once every part is read: Analyse sets it to the documents its run read in full, so earlier findings stay as they are.
+- A part output whose doc.id isn't the document it's filed under (or that isn't a JSON object with a doc block) is
+  never merged into it: it's left out, as if missing, and reported.
 
     python3 -I packages/landscape/build.py <working-folder> merge
 """
 import json
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -27,6 +32,16 @@ MARKETS = {m["slug"] for m in structure["markets"]}
 RANK = {"keep": 2, "weak": 1, "drop": 0, "panel": 0}
 
 
+def part_output(path, ids):
+    """A part output, if it's the document it's filed under (its doc.id one of `ids`), else None."""
+    try:
+        out = json.loads(path.read_text())
+    except ValueError:
+        return None
+    ok = isinstance(out, dict) and isinstance(out.get("doc"), dict) and out["doc"].get("id") in ids and isinstance(out.get("findings"), list)
+    return out if ok else None
+
+
 def norm(text):
     text = text.lower().replace("­", "").replace("ﬁ", "fi").replace("ﬂ", "fl")
     text = re.sub(r"[‘’‚′`]", "'", text)
@@ -37,17 +52,26 @@ def norm(text):
 
 
 docs = json.loads((EV / "docs-v3.json").read_text())
+ONLY = os.environ.get("PATHWAYS_MERGE_IDS")
+if ONLY is not None:
+    wanted = {each for each in ONLY.split(",") if each}
+    docs = [d for d in docs if d["id"] in wanted]
 report = []
 for d in docs:
-    parts = sorted(EV.glob(f"parts-out/{safe_name(d['id'])}.p*.json"))
+    outs, refused = [], []
+    for path in sorted(EV.glob(f"parts-out/{safe_name(d['id'])}.p*.json")):
+        out = part_output(path, {d["id"]})
+        (outs if out is not None else refused).append((path, out))
+    if refused:
+        report.append((d["id"], f"REFUSED part outputs not filed for this document: {', '.join(path.name for path, _ in refused)}"))
+    parts = [path for path, _ in outs]
     if len(parts) < d["parts"]:
         report.append((d["id"], f"MISSING parts: {len(parts)}/{d['parts']}"))
-        if not parts:
+        if not parts or ONLY is not None:  # a limited merge writes no findings from part of a document
             continue
     grades, docblock, market, proposals, shaping = [], None, [], [], []
     checked = verified = 0
-    for path in parts:
-        out = json.loads(path.read_text())
+    for path, out in outs:
         docblock = docblock or out["doc"]
         grades.append(out["doc"].get("grade", "weak"))
         source = norm((EV / "parts" / (path.stem + ".txt")).read_text(errors="ignore"))
