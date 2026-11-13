@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # /pathways
 
-Opens the Pathways tool on this laptop. It runs from this plugin on its own, from any folder: no repo, and nothing for the person to install by hand: the first run sets up Node and cloudflared itself, and macOS installs Apple's developer tools (git, Python) if they're missing. Its working folder is `~/Downloads/Pathways` (or `PATHWAYS_WORKSPACE` if it's set). It starts empty: the person fetches the latest documents and the industries and markets from Cloudflare into the working folder, and works from there. **Analyse and extract** turns the documents into text and starts its own headless Claude Code session on the person's plan to read them against the extraction brief, then runs the landscape build. The person works in the tool; you start it, open it, and help when they ask.
+Opens the Pathways tool on this laptop. It runs from this plugin on its own, from any folder: no repo, and nothing for the person to install by hand: the first run sets up Node and cloudflared itself, and macOS installs Apple's developer tools (git, Python) if they're missing. Its working folder is `~/Downloads/Pathways` (or `PATHWAYS_WORKSPACE` if it's set). It starts empty: **Fetch latest** brings down the published state behind the version on staging (extracted text, findings, edits, settings and the built map, never the original documents) and the list of documents, so everything published shows as published and only documents added since show as new. **Analyse and extract** reads only those new documents (the client's own through the client's pipeline): it gets each one's text, starts its own headless Claude Code session on the person's plan to read them against the extraction brief, then runs the landscape build. The person works in the tool; you start it, open it, and help when they ask.
 
 The tool's commands go through one starter: `sh "${CLAUDE_PLUGIN_ROOT}/start.sh" "${CLAUDE_PLUGIN_DATA}" <command>`, with `start`, `stop`, `status` and `check`. The starter keeps its own pinned Node and cloudflared in the plugin's data folder (downloaded once, each checked against its fingerprint) and runs the tool with them.
 
@@ -33,7 +33,7 @@ Then check with a text search of the page (`find`), not a screenshot, whether it
 
 ## 3. Tell the person
 
-In two or three lines: the tool is open, and the working folder's path. Don't repeat the address or its token in the chat; if the person needs it again, `sh "${CLAUDE_PLUGIN_ROOT}/start.sh" "${CLAUDE_PLUGIN_DATA}" status` prints it. If they aren't signed in yet, their browser opens at Cloudflare's sign-in by itself when the tool opens: tell them to sign in there (their email, an emailed code, then their authenticator app). Then, if there are no documents yet, they press **Fetch latest** in Documents, and the documents download into the working folder. They sign in themselves; you don't.
+In two or three lines: the tool is open, and the working folder's path. Don't repeat the address or its token in the chat; if the person needs it again, `sh "${CLAUDE_PLUGIN_ROOT}/start.sh" "${CLAUDE_PLUGIN_DATA}" status` prints it. If they aren't signed in yet, their browser opens at Cloudflare's sign-in by itself when the tool opens: tell them to sign in there (their email, an emailed code, then their authenticator app). Then, if there are no documents yet, they press **Fetch latest** in Documents, which brings the published text and data into the working folder (no original documents). They sign in themselves; you don't.
 
 ## While it's open
 

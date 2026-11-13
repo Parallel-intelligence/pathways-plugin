@@ -34,14 +34,14 @@ The Claude app has no button for adding a plugin from outside its own list, so C
 
 ## Working in it
 
-- **Documents > Fetch latest** downloads the current documents.
-- Add any new documents, then press **Analyse and extract**. Check the map preview.
+- **Documents > Fetch latest** brings down what's published: the extracted text and data behind the version on staging, never the original documents.
+- Add any new documents, then press **Analyse and extract**. It reads only the new ones. Check the map preview.
 - Press **Publish** when it's ready. Publishing puts the version on the team's staging portal, and asks you to confirm first. Once it's been checked there, an admin presses **Promote** in Versions to send it to the client's site.
 - Only one person can edit at a time. Pathways tells you if someone else is editing.
 
 ## Keeping the data safe
 
-- The documents download to the **Pathways** folder in your Downloads. Don't copy them anywhere else, and don't paste them into other chats.
+- The text and data live in the **Pathways** folder in your Downloads. Don't copy them anywhere else, and don't paste them into other chats.
 - After you've published, delete that Pathways folder.
 - When you're done for the day, type "stop Pathways" in the chat.
 
