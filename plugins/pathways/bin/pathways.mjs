@@ -1320,7 +1320,7 @@ async function restoreDev({ call, id }) {
 }
 //#endregion
 //#region standalone/versions.ts
-var AT_ONCE$1 = 8;
+var AT_ONCE$2 = 8;
 var MAX_PROMOTE_ROUNDS = 50;
 var versionNumber = (version) => Number(version.replace(/^v/, ""));
 var versionName = (number) => `v${String(number).padStart(4, "0")}`;
@@ -1443,7 +1443,7 @@ async function sendVersion(call, { files, documents, note, workspace, onProgress
 		const name = version;
 		let done = have.size;
 		onProgress(done, files.length, name);
-		await inTurn(files.filter((file) => have.get(file.path) !== file.sha256), AT_ONCE$1, async (file) => {
+		await inTurn(files.filter((file) => have.get(file.path) !== file.sha256), AT_ONCE$2, async (file) => {
 			const sent = await call(`/v0/versions/${name}/files/${file.path}`, {
 				method: "PUT",
 				headers: {
@@ -1798,15 +1798,15 @@ async function keptByDocument(call, file, destination) {
 		...theirs
 	}, null, 2));
 }
-/** The document list, last: the tool shows documents once everything else is here. */
-function writeIndex(root, documents) {
+/** The document list, last: the tool shows documents once everything else is here. Archive keeps `fetchedAt`. */
+function writeIndex(root, documents, fetchedAt = (/* @__PURE__ */ new Date()).toISOString()) {
 	refuseLinks(root, "documents/index.json");
 	mkdirSync(path.join(root, "documents"), {
 		recursive: true,
 		mode: 448
 	});
 	writeFileWhole(path.join(root, "documents", "index.json"), JSON.stringify({
-		fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+		fetchedAt,
 		documents
 	}, null, 2));
 }
@@ -1876,7 +1876,7 @@ var SINGLE_MAX = 99614720;
 var PART_BYTES = 67108864;
 var TEXT_MAX$1 = 20971520;
 var CHARTS_MAX = 5242880;
-var AT_ONCE = 4;
+var AT_ONCE$1 = 4;
 var MANIFEST = ".pathways-library.json";
 var ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
 var SCHEMA = "library/1";
@@ -2316,13 +2316,13 @@ async function uploadLibrary({ root, call, client, licensed, log = () => {}, par
 	let texts = 0;
 	let charts = 0;
 	try {
-		await eachAtOnce(toSend, AT_ONCE, async (doc) => {
+		await eachAtOnce(toSend, AT_ONCE$1, async (doc) => {
 			await renew();
 			await uploadOne(root, call, doc, partBytes);
 			sent++;
 			if (sent % 25 === 0) log(`  uploaded ${sent} of ${toSend.length}`);
 		});
-		await eachAtOnce(manifest.documents.filter((doc) => !skip.has(doc.sha256) && (doc.text && !stored.get(doc.sha256)?.textSha256 || doc.charts && !stored.get(doc.sha256)?.chartsSha256)), AT_ONCE, async (doc) => {
+		await eachAtOnce(manifest.documents.filter((doc) => !skip.has(doc.sha256) && (doc.text && !stored.get(doc.sha256)?.textSha256 || doc.charts && !stored.get(doc.sha256)?.chartsSha256)), AT_ONCE$1, async (doc) => {
 			await renew();
 			if (!stored.get(doc.sha256)?.textSha256 && await storeBeside(root, call, doc, "text")) texts++;
 			if (!stored.get(doc.sha256)?.chartsSha256 && await storeBeside(root, call, doc, "charts")) charts++;
@@ -4129,6 +4129,56 @@ function findClaude() {
 	].find(executable) ?? null;
 }
 //#endregion
+//#region standalone/archive.ts
+var AT_ONCE = 8;
+/**
+* Archives (or, with `archived` false, restores) the documents the tool knows by `ids` (findings.ts documentId).
+* The Worker needs the checkout, which the caller holds. An id that isn't in the Worker's list stops it before anything
+* changes. Once anything may have changed, the list is updated even when the Worker refuses one or a call fails
+* part-way, so the tool shows what Cloudflare now holds, and why it stopped comes back with the count. `outsideGit`
+* (workspace.ts assertOutsideGit) checks the folder before the list is written, as Fetch latest does.
+*/
+async function setArchived({ root, call, ids, archived, outsideGit }) {
+	const byId = new Map((await documentList(call)).map((doc) => [documentId(doc.sha256, doc.confidentiality), doc]));
+	const targets = [...new Set(ids)].map((id) => byId.get(id));
+	if (targets.some((doc) => !doc)) throw new Error("Some of those documents aren't in Cloudflare's list, so nothing was changed. Press Fetch latest, then try again.");
+	const chosen = targets;
+	const queue = chosen.filter((doc) => Boolean(doc.archivedAt) !== archived);
+	const action = archived ? "archive" : "restore";
+	let refused = null;
+	await Promise.all(Array.from({ length: Math.min(AT_ONCE, queue.length) }, async () => {
+		for (let doc = queue.shift(); doc && !refused; doc = queue.shift()) await call(`/v0/documents/${doc.sha256}/${action}`, { method: "POST" }).then(ok$1).catch((error) => refused ??= error);
+	}));
+	const now = new Map((await documentList(call)).map((doc) => [doc.sha256, doc]));
+	const wanted = new Set(chosen.map((doc) => doc.sha256));
+	outsideGit(root);
+	const { documents, fetchedAt } = patched(root, now, wanted);
+	writeIndex(root, documents, fetchedAt);
+	return {
+		changed: chosen.filter((doc) => Boolean(now.get(doc.sha256)?.archivedAt) === archived).length,
+		error: refused === null ? null : refused instanceof Error ? refused.message : String(refused)
+	};
+}
+/**
+* The list as it is, with the chosen documents' entries as the Worker now has them. With no list yet, or one that isn't
+* JSON, the Worker's, as Fetch latest would write it: a parse error would quote the file, filenames and all.
+*/
+function patched(root, now, wanted) {
+	refuseLinks(root, "documents/index.json");
+	const file = path.join(root, "documents", "index.json");
+	let listed;
+	try {
+		listed = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+	} catch {
+		listed = null;
+	}
+	if (!listed || !Array.isArray(listed.documents)) return { documents: [...now.values()] };
+	return {
+		documents: listed.documents.map((doc) => wanted.has(doc.sha256) ? now.get(doc.sha256) ?? doc : doc),
+		...typeof listed.fetchedAt === "string" ? { fetchedAt: listed.fetchedAt } : {}
+	};
+}
+//#endregion
 //#region standalone/portals.ts
 /** Each portal's address as an https origin, or left out. */
 function portalLinks(value) {
@@ -4541,6 +4591,32 @@ async function pushRecord(record, body) {
 		if (!yours) await worker("/v0/checkout", token, { method: "DELETE" });
 	}
 }
+var DOCUMENT_ID = /^(d|licensed)-[0-9a-f]{12}$/;
+var archiving = false;
+/** Archive at work, for Analyse, Publish, Roll back, Promote and uploads to wait for: it rewrites the document list. */
+var archiveBusy = () => archiving ? "Archive" : null;
+var MAX_ARCHIVE_BODY = 262144;
+/** Archives or restores documents in Cloudflare, then updates the document list (archive.ts): how many, and why it stopped. */
+async function archive(body) {
+	let ids;
+	let archived;
+	try {
+		({ids, archived} = JSON.parse(body.toString("utf8")));
+	} catch {
+		throw new Error("The page sent something that isn't JSON.");
+	}
+	if (!Array.isArray(ids) || ids.length === 0 || ids.length > 5e3 || !ids.every((id) => typeof id === "string" && DOCUMENT_ID.test(id)) || typeof archived !== "boolean") throw new Error("Choose which documents to archive or restore.");
+	const root = workingFolderPath();
+	assertOutsideGit(root);
+	const call = callWith(await signedInToken());
+	return withCheckout(call, archived ? "archived" : "restored", () => setArchived({
+		root,
+		call,
+		ids,
+		archived,
+		outsideGit: assertOutsideGit
+	}));
+}
 var tookCheckout = false;
 /** Uploads one document to the raw bucket through the Worker, and keeps a copy in the working folder. */
 async function upload(bytes, filename, confidentiality) {
@@ -4586,14 +4662,14 @@ async function finishUploads() {
 	tookCheckout = false;
 	await worker("/v0/checkout", await signedInToken(), { method: "DELETE" });
 }
-function readBytes(req) {
+function readBytes(req, limit = MAX_UPLOAD) {
 	return new Promise((resolve, reject) => {
 		const chunks = [];
 		let size = 0;
 		req.on("data", (chunk) => {
 			size += chunk.length;
-			if (size > MAX_UPLOAD) {
-				reject(/* @__PURE__ */ new Error("A file is larger than 95 MB."));
+			if (size > limit) {
+				reject(/* @__PURE__ */ new Error(limit === MAX_UPLOAD ? "A file is larger than 95 MB." : "The page sent too much."));
 				req.destroy();
 			} else chunks.push(chunk);
 		});
@@ -4610,8 +4686,9 @@ function json$2(res, status, value) {
 	res.end(JSON.stringify(value));
 }
 /**
-* /api/session, /api/sign-in, /api/fetch (and /api/fetch/fresh) and /api/upload. Changes only from the tool's own page.
-* `busy` names other work on the working folder (Analyse, Validate's rebuild, publishing), which a fetch waits for.
+* /api/session, /api/sign-in, /api/fetch (and /api/fetch/fresh), /api/upload and /api/archive. Changes only from the
+* tool's own page. `busy` names other work on the working folder (Analyse, Validate's rebuild, publishing), which a
+* fetch and an archive wait for.
 */
 function cloudflareHandler(busy = () => null) {
 	return (req, res, next) => {
@@ -4630,6 +4707,7 @@ function cloudflareHandler(busy = () => null) {
 		}
 		if (call === "GET /api/fetch") return json$2(res, 200, job$2);
 		if (call === "POST /api/upload") {
+			if (archiving) return json$2(res, 409, { error: "Wait for Archive to finish, then add the files." });
 			const filename = decodeURIComponent(String(req.headers["x-pathways-filename"] ?? ""));
 			readBytes(req).then((bytes) => upload(bytes, filename, String(req.headers["x-pathways-confidentiality"] ?? ""))).then((result) => json$2(res, 200, result)).catch((error) => {
 				console.error(`[upload] ${error.message}`);
@@ -4638,9 +4716,19 @@ function cloudflareHandler(busy = () => null) {
 			return;
 		}
 		if (call === "POST /api/upload/finish") return void finishUploads().then(() => json$2(res, 200, {}), () => json$2(res, 200, {}));
+		if (call === "POST /api/archive") {
+			const waiting = busy() ?? (job$2.running ? "Fetch latest" : archiving ? "the last archive" : tookCheckout ? "Add files" : null);
+			if (waiting) return json$2(res, 409, { error: `Wait for ${waiting} to finish, then try again.` });
+			archiving = true;
+			readBytes(req, MAX_ARCHIVE_BODY).then(archive).then((result) => json$2(res, 200, result)).catch((error) => {
+				console.error(`[archive] ${error.message}`);
+				json$2(res, 400, { error: error.message });
+			}).finally(() => archiving = false);
+			return;
+		}
 		if (call === "POST /api/fetch" || call === "POST /api/fetch/fresh") {
 			if (!job$2.running) {
-				const waiting = busy();
+				const waiting = busy() ?? (archiving ? "Archive" : null);
 				if (waiting) return json$2(res, 409, { error: `Wait for ${waiting} to finish, then fetch.` });
 				job$2 = {
 					running: true,
@@ -5333,8 +5421,10 @@ function analysisHandler(landscapeDir) {
 			return json$1(res, 202, job$1);
 		}
 		if (job$1.running) return json$1(res, 409, { error: "An analysis is already running." });
+		if (archiveBusy()) return json$1(res, 409, { error: "Wait for Archive to finish, then analyse." });
 		readBody(req).then((body) => {
 			if (job$1.running) return json$1(res, 409, { error: "An analysis is already running." });
+			if (archiveBusy()) return json$1(res, 409, { error: "Wait for Archive to finish, then analyse." });
 			const everything = body.everything === true;
 			stopping = false;
 			usedKey = null;
@@ -5622,7 +5712,7 @@ function publishHandler() {
 		}
 		if (req.method !== "POST" || route === "/api/versions") return json(res, 405, { error: "Method not allowed" });
 		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json(res, 403, { error: "Forbidden" });
-		const busy = job.running ? "Publishing is under way" : promoteJob.running ? "Promoting is under way" : null;
+		const busy = job.running ? "Publishing is under way" : promoteJob.running ? "Promoting is under way" : archiveBusy() ? "Archiving is under way" : null;
 		if (route === "/api/rollback") {
 			if (busy) return json(res, 409, { error: `${busy}: roll back once it's done.` });
 			readJson(req).then(async (body) => rollbackStaging(await signedInCall(), String(body.version ?? ""))).then((value) => json(res, 200, value)).catch((error) => {
