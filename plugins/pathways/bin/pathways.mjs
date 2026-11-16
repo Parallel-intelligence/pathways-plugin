@@ -1,6 +1,6 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { accessSync, closeSync, constants, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
 import { open } from "node:fs/promises";
@@ -4166,6 +4166,112 @@ function findClaude() {
 		...desktopCopies(home)
 	].find(executable) ?? null;
 }
+/** How a sign-in problem shows in what Claude Code says. Whole words only, so a number or a longer word never counts. */
+var SIGN_IN_PROBLEM = /\bauthenticat|\boauth\b|\blog ?in\b|\b401\b/i;
+/** The claude command as the person types it in Terminal: its name when it's the one on PATH, else its full path. */
+var commandFor = (claude) => (process.env.PATH ?? "").split(path.delimiter).some((dir) => path.isAbsolute(dir) && path.join(dir, "claude") === claude) ? "claude" : JSON.stringify(claude);
+/** What to do about a sign-in problem, said the same way by the check-up and by Analyse, each adding what comes next. */
+var signInFix = (claude) => `In Terminal, run ${commandFor(claude)} auth login and sign in with the Claude account approved for this work.`;
+/**
+* The environment Analyse's session runs in, and the sign-in checks below: the person's own Claude plan only (no API
+* keys, no Bedrock or Vertex, and not mistaken for a nested session), with no error reports or telemetry.
+*/
+var sessionEnv = (from = process.env) => ({
+	...Object.fromEntries(Object.entries(from).filter(([name]) => !/^(ANTHROPIC_|CLAUDE_CODE_|CLAUDECODE)/.test(name))),
+	CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+	CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+	DISABLE_ERROR_REPORTING: "1",
+	DISABLE_TELEMETRY: "1"
+});
+/** What `claude auth status` says in Analyse's environment: whether a sign-in is stored, and how. Empty if it can't say. */
+function authStatus(claude, env = sessionEnv()) {
+	try {
+		return JSON.parse(execFileSync(claude, ["auth", "status"], {
+			encoding: "utf8",
+			stdio: "pipe",
+			env,
+			timeout: 15e3,
+			killSignal: "SIGKILL"
+		}));
+	} catch {
+		return {};
+	}
+}
+/**
+* Whether the claude command reaches the person's Claude plan the way Analyse's session will. `claude auth status`
+* says only that a sign-in is stored, not that it still works: on 13 Nov 2026 it said signed in, and Analyse then
+* failed on an expired one. So, once auth status shows a Claude plan and no API key (nothing here may use one: no call
+* is made otherwise), this makes one tiny call: a fixed prompt, no tools, settings, hooks, MCP servers or documents,
+* from an empty folder, in Analyse's environment. It counts as working only when Claude's own first message says no
+* API key was used, and its reply succeeded. `signal` stops it (Analyse's Stop, the server's exit).
+*/
+async function checkSignIn(claude, { timeoutMs = 9e4, env = sessionEnv(), signal } = {}) {
+	const auth = authStatus(claude, env);
+	if (!auth.loggedIn) return {
+		signIn: "signed-out",
+		auth
+	};
+	if (auth.authMethod !== "claude.ai" || auth.apiKeySource) return {
+		signIn: "not-plan",
+		auth
+	};
+	let cwd;
+	try {
+		cwd = mkdtempSync(path.join(os.tmpdir(), "pathways-sign-in-"));
+	} catch {
+		return {
+			signIn: "unknown",
+			auth
+		};
+	}
+	const args = [
+		"-p",
+		"Reply with the one word: ready",
+		"--tools",
+		"",
+		"--permission-mode",
+		"dontAsk",
+		"--strict-mcp-config",
+		"--setting-sources",
+		"",
+		"--settings",
+		"{\"disableAllHooks\":true,\"autoMemoryEnabled\":false}",
+		"--no-session-persistence",
+		"--output-format",
+		"json",
+		"--verbose"
+	];
+	return {
+		signIn: await new Promise((resolve) => {
+			execFile(claude, args, {
+				cwd,
+				env,
+				timeout: timeoutMs,
+				killSignal: "SIGKILL",
+				signal,
+				maxBuffer: 1048576
+			}, (error, stdout, stderr) => {
+				let messages;
+				try {
+					const parsed = JSON.parse(String(stdout));
+					messages = Array.isArray(parsed) ? parsed : parsed ? [parsed] : null;
+				} catch {
+					messages = null;
+				}
+				const init = messages?.find((each) => each?.type === "system" && each.subtype === "init");
+				const reply = messages?.find((each) => each?.type === "result");
+				if (init?.apiKeySource && init.apiKeySource !== "none") return resolve("not-plan");
+				const said = reply ? `${reply.result ?? ""} ${String(stderr)}` : `${String(stdout)} ${String(stderr)}`;
+				if (SIGN_IN_PROBLEM.test(reply && !error && reply.is_error === false ? reply.result ?? "" : said)) return resolve("signed-out");
+				resolve(!error && reply?.is_error === false && init?.apiKeySource === "none" ? "works" : "unknown");
+			}).stdin?.end();
+		}).finally(() => rmSync(cwd, {
+			recursive: true,
+			force: true
+		})),
+		auth
+	};
+}
 //#endregion
 //#region standalone/archive.ts
 var AT_ONCE = 8;
@@ -4916,6 +5022,7 @@ var SECURITY_HEADERS = {
 //#endregion
 //#region standalone/analysis.ts
 process.once("exit", () => {
+	signInCheck?.abort();
 	try {
 		if (claude?.pid) process.kill(-claude.pid, "SIGKILL");
 	} catch {}
@@ -4944,7 +5051,7 @@ var output = (command, args, env) => new Promise((resolve, reject) => execFile(c
 	stderr
 })) : resolve(stdout)));
 /** What the session's last message said went wrong, from its log; a sign-in problem gets its fix. */
-function whyClaudeStopped(logFile, exit, route) {
+function whyClaudeStopped(logFile, exit, route, claudeCommand) {
 	const result = readFileSync(logFile, "utf8").trim().split("\n").reverse().map((line) => {
 		try {
 			return JSON.parse(line);
@@ -4953,7 +5060,7 @@ function whyClaudeStopped(logFile, exit, route) {
 		}
 	}).find((event) => event?.type === "result" || event?.error);
 	const text = `${result?.error ?? ""} ${result?.result ?? ""}`;
-	if (/authenticat|oauth|log ?in|401/i.test(text)) return "The claude command's sign-in has expired or is missing. Run `claude auth login` in Terminal, sign in with the Claude account approved for this work, then press Analyse again.";
+	if (SIGN_IN_PROBLEM.test(text)) return `The claude command's sign-in has expired or is missing. ${signInFix(claudeCommand)} Then press Analyse again.`;
 	if (route === "client") return `Claude read none of the client's documents (it exited with ${exit}). Its log is in the client's folder, at runs/current/claude.log.`;
 	const said = (result?.result ?? "").split("\n")[0].slice(0, 200);
 	return `Claude read nothing (it exited with ${exit}${said ? `: ${said}` : ""}). Its log is in the working folder, at landscape/evidence/runs/current/claude.log.`;
@@ -4971,6 +5078,7 @@ var IDLE = {
 };
 var job$1 = IDLE;
 var claude = null;
+var signInCheck = null;
 var stopping = false;
 var usedKey = null;
 var keptAside = null;
@@ -5060,6 +5168,14 @@ async function analyse(landscapeDir, everything) {
 	}
 	const claudeCommand = plan.read.length ? findClaude() : null;
 	if (plan.read.length && !claudeCommand) throw new Error("Claude Code isn't on this Mac. Install the Claude desktop app from claude.ai/download, sign in, then press Analyse again.");
+	if (claudeCommand) {
+		if (stopping) throw new Error("Stopped.");
+		signInCheck = new AbortController();
+		const { signIn, auth } = await checkSignIn(claudeCommand, { signal: signInCheck.signal }).finally(() => signInCheck = null);
+		if (stopping) throw new Error("Stopped.");
+		if (signIn === "not-plan") throw new Error(`The claude command is signed in through an API key, not a Claude plan, so nothing was read: nothing here may use one. In Terminal, run ${commandFor(claudeCommand)} auth logout, then ${commandFor(claudeCommand)} auth login, and choose your Claude account. Then press Analyse again.`);
+		if (signIn === "signed-out") throw new Error(`${auth.loggedIn ? "The claude command's sign-in has expired" : "The claude command isn't signed in"}, so nothing was read. ${signInFix(claudeCommand)} Then press Analyse again.`);
+	}
 	job$1 = {
 		...IDLE,
 		running: true,
@@ -5352,13 +5468,7 @@ async function readParts({ root, client, route, docs, mine, lines, claudeCommand
 		};
 	};
 	const timer = setInterval(progress, 500);
-	const env = {
-		...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(ANTHROPIC_|CLAUDE_CODE_|CLAUDECODE)/.test(name))),
-		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-		CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-		DISABLE_ERROR_REPORTING: "1",
-		DISABLE_TELEMETRY: "1"
-	};
+	const env = sessionEnv();
 	const log = openSync(logFile, "a", 384);
 	const exit = await new Promise((resolve, reject) => {
 		claude = spawn(claudeCommand, [
@@ -5421,7 +5531,7 @@ async function readParts({ root, client, route, docs, mine, lines, claudeCommand
 	progress();
 	if (usedKey) throw new Error(`Stopped before it read anything: Claude was signed in with an API key (${usedKey}), and nothing here may use one. Sign the claude command in to your Claude plan with \`claude auth login\`.`);
 	if (stopping) throw new Error("Stopped.");
-	if (readHere().mineRead === 0) throw new Error(whyClaudeStopped(logFile, exit, route));
+	if (readHere().mineRead === 0) throw new Error(whyClaudeStopped(logFile, exit, route, claudeCommand));
 }
 /** The request's JSON body, small; anything else reads as {}. */
 var readBody = (req) => new Promise((resolve) => {
@@ -5453,6 +5563,7 @@ function analysisHandler(landscapeDir) {
 		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json$1(res, 403, { error: "Forbidden" });
 		if (route === "/api/analyse/stop") {
 			if (job$1.running) stopping = true;
+			signInCheck?.abort();
 			if (claude?.pid) try {
 				process.kill(-claude.pid, "SIGTERM");
 			} catch {}
@@ -6137,25 +6248,21 @@ async function checkUp() {
 		fail("Python 3 isn't installed", "It comes with Apple's developer tools: type /pathways again and click Install when macOS asks. Analyse needs it.");
 	}
 	const claude = findClaude();
-	const command = claude ? JSON.stringify(claude) : "claude";
+	const command = claude ? commandFor(claude) : "claude";
 	try {
 		if (!claude) throw new Error("not found");
 		const found = execFileSync(claude, ["--version"], {
 			encoding: "utf8",
 			stdio: "pipe"
 		}).match(/\d+\.\d+\.\d+/)?.[0] ?? "installed";
-		const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(ANTHROPIC_|CLAUDE_CODE_|CLAUDECODE)/.test(name)));
-		let auth = {};
-		try {
-			auth = JSON.parse(execFileSync(claude, ["auth", "status"], {
-				encoding: "utf8",
-				stdio: "pipe",
-				env
-			}));
-		} catch {}
-		if (!auth.loggedIn) fail(`Claude Code ${found} isn't signed in`, `In Terminal, run ${command} auth login and sign in with the Claude account approved for this work. Analyse needs it.`);
-		else if (auth.authMethod !== "claude.ai") fail(`Claude Code ${found} is signed in through ${auth.authMethod ?? "an unknown method"}, not a Claude plan`, `In Terminal, run ${command} auth logout, then ${command} auth login and choose your Claude account (not Anthropic Console): nothing here may use an API key.`);
-		else pass(`Claude Code ${found}, signed in to a Claude plan as ${auth.email ?? "someone"}`);
+		const { signIn, auth } = await checkSignIn(claude, {
+			env: sessionEnv(),
+			timeoutMs: 2e4
+		});
+		const login = `${signInFix(claude)} Analyse needs it.`;
+		if (signIn === "not-plan") fail(`Claude Code ${found} is signed in through an API key (${auth.apiKeySource ?? auth.authMethod ?? "an unknown method"}), not a Claude plan`, `In Terminal, run ${command} auth logout, then ${command} auth login and choose your Claude account (not Anthropic Console): nothing here may use an API key.`);
+		else if (signIn === "signed-out") fail(auth.loggedIn ? `Claude Code ${found} has a sign-in for ${auth.email ?? "someone"} stored, but it has expired` : `Claude Code ${found} isn't signed in`, login);
+		else pass(`Claude Code ${found}, signed in to a Claude plan as ${auth.email ?? "someone"}${signIn === "unknown" ? " (couldn't confirm it works just now)" : ""}`);
 	} catch {
 		fail("Claude Code isn't on this Mac", "Install the Claude desktop app from claude.ai/download and sign in, then run /pathways again. Analyse needs it.");
 	}
