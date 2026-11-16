@@ -656,6 +656,8 @@ var rulesHash = rules.hash;
 var rulesHandler = rules.handler;
 //#endregion
 //#region ../admin/src/checks.js
+var LAYER_FILE = /^(growth|presence|similarity)\.json$/;
+var VERSION_FILE$1 = /^(bundle\.json|docs\.json|growth\.json|presence\.json|similarity\.json|evidence\/[a-z0-9][a-z0-9-]{0,79}\.json|covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg)$/;
 var DEV_FOLDERS$1 = [
 	"landscape",
 	"sources",
@@ -712,7 +714,25 @@ function workspacePathProblem(path, clientId) {
 	if (why) return why;
 	return workspacePaths(clientId).some((pattern) => pattern.test(path)) ? null : "isn't part of a version's working state";
 }
-new Set("internal reviewer reviewers reviewed review approver approvers approved decided debug agent agents draft drafted mint minted proposed archetype note notes comment comments rationale reasoning email prompt session rule rules".split(" "));
+var INTERNAL_WORDS = new Set("internal reviewer reviewers reviewed review approver approvers approved decided debug agent agents draft drafted mint minted proposed archetype note notes comment comments rationale reasoning email prompt session rule rules".split(" "));
+function isInternalField(key) {
+	if (key.startsWith("_")) return true;
+	return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[\s_-]+/).some((word) => INTERNAL_WORDS.has(word.toLowerCase()));
+}
+/** The path of the first internal field in a JSON value, or null. */
+function findInternalField(value, path = "") {
+	if (Array.isArray(value)) for (let i = 0; i < value.length; i++) {
+		const found = findInternalField(value[i], `${path}[${i}]`);
+		if (found) return found;
+	}
+	else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) {
+		const here = path ? `${path}.${key}` : key;
+		if (isInternalField(key)) return here;
+		const found = findInternalField(child, here);
+		if (found) return found;
+	}
+	return null;
+}
 var SLUG_KEY = /^[a-z0-9][a-z0-9-]{0,119}$/;
 var PAIR_KEY = /^[a-z0-9][a-z0-9-]{0,240}$/;
 var TEXT = { kind: "string" };
@@ -753,77 +773,186 @@ var SIMILARITY_LAYER = record$1({
 	sharedDocs: MATRIX
 }, ["pull", "sharedDocs"]);
 var BASE_OR_CLIENT = /^(base|client)$/;
-record$1({
-	groups: list$1(record$1({
-		key: SLUG$1,
-		one: TEXT,
-		many: TEXT
-	})),
-	hills: bySlug(record$1({
-		states: bySlug(COUNT, /^(sells|explores|perceived|studies)$/),
-		types: bySlug(COUNT)
-	}))
-}), record$1({
-	growth: bySlug(record$1({
-		size: NUMBER,
-		cagr: maybe(NUMBER),
-		sizeEst: FLAG,
-		sizeSheet: FLAG,
-		sizeRough: FLAG,
-		sizeLabel: maybe(TEXT),
-		cagrEst: FLAG,
-		sector: TEXT
-	})),
-	perf: bySlug(record$1({
-		r: NUMBER,
-		g: maybe(TEXT),
-		lo: maybe(NUMBER),
-		hi: maybe(NUMBER),
-		b: maybe(TEXT),
-		src: maybe(TEXT),
-		sz: maybe(TEXT)
-	})),
-	leaders: bySlug(list$1(TEXT))
-}), record$1({
-	about: TEXT,
-	version: {
-		kind: "const",
-		value: 2
-	},
-	map: TEXT,
-	hierarchyVersion: TEXT,
-	builtAt: TEXT,
-	default: {
-		kind: "string",
-		pattern: BASE_OR_CLIENT
-	},
-	method: record$1({
-		base: TEXT,
-		client: TEXT,
-		layout: TEXT,
-		kept: bySlug(record$1({
-			mdsTop3Kept: NUMBER,
-			top3Kept: NUMBER
-		}), BASE_OR_CLIENT)
-	}, ["client"]),
-	industries: record$1({
-		slugs: list$1(SLUG$1),
-		why: bySlug(TEXT, PAIR_KEY),
-		layers: bySlug(SIMILARITY_LAYER, BASE_OR_CLIENT)
+var LAYERS$1 = {
+	"presence.json": record$1({
+		groups: list$1(record$1({
+			key: SLUG$1,
+			one: TEXT,
+			many: TEXT
+		})),
+		hills: bySlug(record$1({
+			states: bySlug(COUNT, /^(sells|explores|perceived|studies)$/),
+			types: bySlug(COUNT)
+		}))
 	}),
-	markets: bySlug(record$1({
-		slugs: list$1(SLUG$1),
-		score: MATRIX,
-		why: bySlug(TEXT, PAIR_KEY),
-		offset: MATRIX
-	})),
-	marketLinks: list$1(record$1({
-		a: SLUG$1,
-		b: SLUG$1,
-		score: NUMBER,
-		why: TEXT
-	}))
-});
+	"growth.json": record$1({
+		growth: bySlug(record$1({
+			size: NUMBER,
+			cagr: maybe(NUMBER),
+			sizeEst: FLAG,
+			sizeSheet: FLAG,
+			sizeRough: FLAG,
+			sizeLabel: maybe(TEXT),
+			cagrEst: FLAG,
+			sector: TEXT
+		})),
+		perf: bySlug(record$1({
+			r: NUMBER,
+			g: maybe(TEXT),
+			lo: maybe(NUMBER),
+			hi: maybe(NUMBER),
+			b: maybe(TEXT),
+			src: maybe(TEXT),
+			sz: maybe(TEXT)
+		})),
+		leaders: bySlug(list$1(TEXT))
+	}),
+	"similarity.json": record$1({
+		about: TEXT,
+		version: {
+			kind: "const",
+			value: 2
+		},
+		map: TEXT,
+		hierarchyVersion: TEXT,
+		builtAt: TEXT,
+		default: {
+			kind: "string",
+			pattern: BASE_OR_CLIENT
+		},
+		method: record$1({
+			base: TEXT,
+			client: TEXT,
+			layout: TEXT,
+			kept: bySlug(record$1({
+				mdsTop3Kept: NUMBER,
+				top3Kept: NUMBER
+			}), BASE_OR_CLIENT)
+		}, ["client"]),
+		industries: record$1({
+			slugs: list$1(SLUG$1),
+			why: bySlug(TEXT, PAIR_KEY),
+			layers: bySlug(SIMILARITY_LAYER, BASE_OR_CLIENT)
+		}),
+		markets: bySlug(record$1({
+			slugs: list$1(SLUG$1),
+			score: MATRIX,
+			why: bySlug(TEXT, PAIR_KEY),
+			offset: MATRIX
+		})),
+		marketLinks: list$1(record$1({
+			a: SLUG$1,
+			b: SLUG$1,
+			score: NUMBER,
+			why: TEXT
+		}))
+	})
+};
+var isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+function shapeProblem(value, shape, path) {
+	switch (shape.kind) {
+		case "string":
+			if (typeof value !== "string") return `${path} isn't text`;
+			if (shape.pattern && !shape.pattern.test(value)) return `${path} isn't one of the allowed values`;
+			return shape.words && isInternalField(value) ? `${path} holds a word map data never carries` : null;
+		case "number": return typeof value === "number" && Number.isFinite(value) ? null : `${path} isn't a number`;
+		case "count": return Number.isInteger(value) && value >= 0 ? null : `${path} isn't a count`;
+		case "boolean": return typeof value === "boolean" ? null : `${path} isn't true or false`;
+		case "const": return value === shape.value ? null : `${path} isn't ${shape.value}`;
+		case "nullable": return value === null ? null : shapeProblem(value, shape.shape, path);
+		case "array":
+			if (!Array.isArray(value)) return `${path} isn't a list`;
+			for (let i = 0; i < value.length; i++) {
+				const found = shapeProblem(value[i], shape.shape, `${path}[${i}]`);
+				if (found) return found;
+			}
+			return null;
+		case "object":
+			if (!isPlainObject(value)) return `${path} isn't an object`;
+			for (const key of Object.keys(value)) if (!Object.hasOwn(shape.fields, key)) return `${path} has a field this layer doesn't have`;
+			for (const [key, child] of Object.entries(shape.fields)) {
+				if (!Object.hasOwn(value, key)) {
+					if (shape.optional.has(key)) continue;
+					return `${path}.${key} is missing`;
+				}
+				const found = shapeProblem(value[key], child, `${path}.${key}`);
+				if (found) return found;
+			}
+			return null;
+		case "map":
+			if (!isPlainObject(value)) return `${path} isn't an object`;
+			for (const [key, child] of Object.entries(value)) {
+				if (!shape.key.test(key)) return `${path} has a key that isn't allowed`;
+				if (shape.words && isInternalField(key)) return `${path}.${key} holds a word map data never carries`;
+				const found = shapeProblem(child, shape.shape, `${path}.${key}`);
+				if (found) return found;
+			}
+			return null;
+		default: throw new Error(`unknown shape ${shape.kind}`);
+	}
+}
+/** Why a map layer (growth.json, presence.json or similarity.json) isn't the shape the map reads, or null. */
+function layerProblem(path, value) {
+	const shape = LAYERS$1[path];
+	if (!shape) return `${path} isn't a map layer`;
+	const name = path.replace(/\.json$/, "");
+	const found = shapeProblem(value, shape, name);
+	if (found || path !== "presence.json") return found;
+	const groups = new Set(value.groups.map((group) => group.key));
+	for (const [hill, { types }] of Object.entries(value.hills)) if (Object.keys(types).some((key) => !groups.has(key))) return `${name}.hills.${hill}.types names a group the layer doesn't declare`;
+	return null;
+}
+/**
+* Why a cover isn't a clean JPEG, or null. Covers are the only files with no fields to check, so
+* only the segments an image needs are allowed, and nothing may follow the end of the image.
+* The compressed image data itself can't be proven free of text without decoding it.
+*/
+function jpegProblem(bytes) {
+	const n = bytes.byteLength;
+	const invalid = "isn't a valid JPEG";
+	if (n < 4 || bytes[0] !== 255 || bytes[1] !== 216) return "isn't a JPEG";
+	let at = 2;
+	let sawFrame = false;
+	let inScan = false;
+	while (at + 1 < n) {
+		if (bytes[at] !== 255) {
+			if (!inScan) return invalid;
+			at += 1;
+			continue;
+		}
+		const marker = bytes[at + 1];
+		if (inScan && (marker === 0 || marker >= 208 && marker <= 215)) {
+			at += 2;
+			continue;
+		}
+		if (marker === 217) return inScan && at === n - 2 ? null : invalid;
+		if (at + 3 >= n) return invalid;
+		const length = bytes[at + 2] << 8 | bytes[at + 3];
+		if (length < 2 || at + 2 + length > n) return invalid;
+		if (marker === 218) {
+			if (!sawFrame) return invalid;
+			inScan = true;
+		} else if (marker === 192 || marker === 193 || marker === 194) {
+			if (inScan) return invalid;
+			sawFrame = true;
+		} else if (marker >= 224 && marker <= 239) {
+			if (inScan || !allowedApp(marker, bytes, at + 4, length - 2)) return "holds metadata or a comment: strip it first";
+		} else if (marker === 254) return "holds metadata or a comment: strip it first";
+		else if (marker !== 219 && marker !== 196 && marker !== 221) return invalid;
+		at += 2 + length;
+	}
+	return invalid;
+}
+/** The application segments an ordinary JPEG needs, recognised by their identifiers. */
+function allowedApp(marker, bytes, start, length) {
+	const id = {
+		224: "JFIF\0",
+		226: "ICC_PROFILE\0",
+		238: "Adobe"
+	}[marker];
+	if (!id || length < id.length) return false;
+	return [...id].every((char, i) => bytes[start + i] === char.charCodeAt(0));
+}
 //#endregion
 //#region standalone/dev.ts
 var DEV_FOLDERS = [
@@ -4289,6 +4418,170 @@ async function checkSignIn(claude, { timeoutMs = 9e4, env = sessionEnv(), signal
 	};
 }
 //#endregion
+//#region standalone/client-map.ts
+var isRow = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var rows = (value) => Array.isArray(value) ? value.filter(isRow) : [];
+var COVER = /^covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg$/;
+var EVIDENCE_NAME = /^[a-z0-9][a-z0-9-]{0,79}\.json$/;
+var LAYERS = [
+	"growth.json",
+	"presence.json",
+	"similarity.json"
+];
+/**
+* The built map's files as the client gets them: without the build's working fields, which the admin Worker refuses
+* (apps/admin/src/checks.js). A market added from evidence is marked `fromEvidence` (the build says `minted`), a
+* licensed document `licensed` (`internal`); archetypes and hidden-passage counts are left out. A document keeps its
+* cover only when the cover's file goes in the version too. The map page reads both spellings.
+*/
+function publishedFiles(bundle, docs, evidence, covers = /* @__PURE__ */ new Set()) {
+	const subthemes = Object.fromEntries(Object.entries(isRow(bundle.subthemes) ? bundle.subthemes : {}).map(([industry, markets]) => [industry, rows(markets).map(({ minted, archetype: _archetype, ...market }) => ({
+		...market,
+		fromEvidence: Boolean(minted)
+	}))]));
+	const documents = Object.fromEntries(Object.entries(isRow(docs.docs) ? docs.docs : {}).map(([id, doc]) => {
+		const { internal, ...rest } = isRow(doc) ? doc : {};
+		const cover = typeof rest.cover === "string" && covers.has(rest.cover) ? rest.cover : null;
+		return [id, {
+			...rest,
+			cover,
+			licensed: Boolean(internal)
+		}];
+	}));
+	const shown = Object.entries(evidence).map(([slug, file]) => [`evidence/${slug}.json`, {
+		...file,
+		topics: rows(file.topics).map(({ internalOnly: _hidden, ...topic }) => topic)
+	}]);
+	return {
+		"bundle.json": {
+			...bundle,
+			subthemes
+		},
+		"docs.json": {
+			...docs,
+			docs: documents
+		},
+		...Object.fromEntries(shown)
+	};
+}
+/**
+* The client's files from a built map, read through `read` (a file of the map, or null) and `list` (the names in one
+* of its folders). `where` names the map folder in what it says. Only the industries the map shows have evidence: a
+* file left from an earlier build (an industry since deleted, or one a preview added) is left out.
+*/
+function clientFiles({ read, list, where }) {
+	const parse = (bytes) => {
+		if (!bytes) return null;
+		try {
+			const value = JSON.parse(bytes.toString("utf8"));
+			return isRow(value) ? value : null;
+		} catch {
+			return null;
+		}
+	};
+	const bundle = parse(read("bundle.json"));
+	const docs = parse(read("docs.json"));
+	if (!bundle || !docs) throw new Error(`There's no built map in the working folder (${where}/). Press Analyse to build it first.`);
+	const evidence = {};
+	const shown = new Set((Array.isArray(bundle.themes) ? bundle.themes : []).map((theme) => isRow(theme) ? theme.slug : null));
+	for (const name of list("evidence")) {
+		const slug = name.replace(/\.json$/, "");
+		if (!shown.has(slug)) continue;
+		if (!EVIDENCE_NAME.test(name)) throw new Error(`${where}/evidence/${name} isn't a file a version can hold.`);
+		const file = parse(read(`evidence/${name}`));
+		if (!file) throw new Error(`${where}/evidence/${name} couldn't be read. Press Analyse to build the map again.`);
+		evidence[slug] = file;
+	}
+	const layers = {};
+	for (const name of LAYERS) {
+		const bytes = read(name);
+		if (!bytes) continue;
+		const layer = parse(bytes);
+		if (!layer) throw new Error(`${where}/${name} couldn't be read. Press Analyse to build the map again.`);
+		layers[name] = layer;
+	}
+	const covers = {};
+	for (const doc of Object.values(isRow(docs.docs) ? docs.docs : {})) {
+		const cover = isRow(doc) ? doc.cover : null;
+		if (typeof cover !== "string" || !COVER.test(cover) || covers[cover]) continue;
+		const bytes = read(cover);
+		if (bytes) covers[cover] = bytes;
+	}
+	return {
+		json: {
+			...publishedFiles(bundle, docs, evidence, new Set(Object.keys(covers))),
+			...layers
+		},
+		covers
+	};
+}
+/**
+* The admin Worker's checks on a version's files (index.js putVersionFile), run here too: the names a version may hold,
+* no internal fields, the layers' shapes, clean JPEG covers, and the sizes. Throws naming the file, never its contents.
+*/
+function checkClientFiles({ json, covers }) {
+	for (const [name, value] of Object.entries(json)) {
+		if (!VERSION_FILE$1.test(name)) throw new Error(`${name} isn't a file a version can hold.`);
+		if (Buffer.byteLength(JSON.stringify(value)) > 10485760) throw new Error(`${name} is larger than a version allows.`);
+		const field = LAYER_FILE.test(name) ? null : findInternalField(value);
+		const wrong = LAYER_FILE.test(name) ? layerProblem(name, value) : field ? `${name} has an internal field, ${field}` : null;
+		if (wrong) throw new Error(`Not accepted: ${wrong}.`);
+	}
+	for (const [name, bytes] of Object.entries(covers)) {
+		if (!VERSION_FILE$1.test(name)) throw new Error(`${name} isn't a file a version can hold.`);
+		if (bytes.byteLength > 5242880) throw new Error(`${name} is larger than a version allows.`);
+		const wrong = jpegProblem(new Uint8Array(bytes));
+		if (wrong) throw new Error(`Not accepted: ${name} ${wrong}.`);
+	}
+}
+/**
+* What `pathways export-map` writes for the dev link (16 Nov 2026): the client's files, as Publish would send them,
+* refused when the map isn't built all the way through (`stale`: why, from publish.ts buildNotThrough and
+* findingsStale), and without a preview build's draft-set names, which can name teammates. Then the admin Worker's
+* checks.
+*/
+function exportFiles({ read, list, where, stale }) {
+	if (stale) throw new Error(stale);
+	const files = clientFiles({
+		read,
+		list,
+		where
+	});
+	delete files.json["bundle.json"].preview;
+	checkClientFiles(files);
+	return files;
+}
+/**
+* Writes the client's files into `folder`, which must be new or empty and not a link: JSON as Publish sends it, covers
+* as they are, each only by a name a version may hold. Folders 0700, files 0600. Returns how many files it wrote.
+*/
+function writeClientFiles(folder, files) {
+	for (const name of [...Object.keys(files.json), ...Object.keys(files.covers)]) if (!VERSION_FILE$1.test(name)) throw new Error(`${name} isn't a file a version can hold.`);
+	if (existsSync(folder)) {
+		const stat = lstatSync(folder);
+		if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${folder} isn't a folder.`);
+		if (readdirSync(folder).length > 0) throw new Error(`${folder} isn't empty: choose a new folder, or empty it first.`);
+	}
+	mkdirSync(folder, {
+		recursive: true,
+		mode: 448
+	});
+	const write = (name, bytes) => {
+		const file = path.join(folder, ...name.split("/"));
+		mkdirSync(path.dirname(file), {
+			recursive: true,
+			mode: 448
+		});
+		writeFileSync(file, bytes, {
+			mode: 384,
+			flag: "wx"
+		});
+	};
+	for (const [name, value] of Object.entries(files.json)) write(name, JSON.stringify(value));
+	for (const [name, bytes] of Object.entries(files.covers)) write(name, bytes);
+	return Object.keys(files.json).length + Object.keys(files.covers).length;
+}
+//#endregion
 //#region standalone/client-filed.ts
 var SHA256 = /^[0-9a-f]{64}$/;
 /**
@@ -5079,6 +5372,252 @@ function cloudflareHandler(busy = () => null) {
 	};
 }
 //#endregion
+//#region standalone/publish.ts
+var VERSION_FILE = /^(bundle\.json|docs\.json|growth\.json|presence\.json|similarity\.json|evidence\/[a-z0-9][a-z0-9-]{0,79}\.json|covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg)$/;
+var MAX_BODY = 65536;
+var hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+var job$1 = {
+	running: false,
+	done: 0,
+	total: 0
+};
+var promoteJob = {
+	running: false,
+	copied: 0,
+	left: 0
+};
+/** What this page's publish or promote is in the middle of, for Fetch latest to wait for; null when neither is running. */
+var publishBusy = () => job$1.running ? "publishing" : promoteJob.running ? "promoting" : null;
+/**
+* Why the built map isn't built all the way through, or null: a build still running, or validated edits or saved
+* settings it wasn't built with. A decision accepted after the build (one hiding a passage, say) isn't in it yet.
+* Publish and `pathways export-map` (the dev link) both refuse on it; `then` ends the message.
+*/
+function buildNotThrough(root, then) {
+	const building = buildRunning();
+	if (building) return `${building} is building the map. ${then === "publish" ? "Publish" : "Export it"} once it's done.`;
+	const accepts = acceptIds(root);
+	const settings = mapSettingsHash(root);
+	const rules = rulesHash(root);
+	const built = builtWith(root);
+	if ((accepts.length || settings || rules || built?.settings || built?.rules) && (!built || accepts.some((id) => !built.accepts.has(id)) || built.settings !== settings || built.rules !== rules)) return `The map wasn't built all the way through with the latest validated edits and settings. Validate the markets again to rebuild it (and Analyse again if the reading rules changed), then ${then}.`;
+	return null;
+}
+/** Why the built map is out of date for the findings the folder holds now, or null (Oliver, 13 Nov 2026). */
+function findingsStale(root, then) {
+	const built = builtWith(root);
+	if (built && findingsChangedSince(root, clientId(), built)) return `Rebuild the map first: the findings changed since it was built. Press Rebuild map in Data, then ${then}.`;
+	return null;
+}
+/** The map the build last made, from the working folder, ready to publish: its JSON files and its covers' bytes. */
+function builtFiles() {
+	clientId();
+	const root = workingFolder();
+	const where = root ? path.relative(root, builtMapPath(root)) : "landscape/map";
+	if (!root || !readBuiltMapFile(root, "bundle.json") || !readBuiltMapFile(root, "docs.json")) throw new Error(`There's no built map in the working folder (${where}/). Press Analyse to build it, then publish.`);
+	const open = openDecisions(root);
+	if (open > 0) throw new Error(`${open === 1 ? "An edit" : `${open} edits`} in Industries and markets ${open === 1 ? "isn't" : "aren't"} validated yet. Validate the markets, then publish.`);
+	const notThrough = buildNotThrough(root, "publish");
+	if (notThrough) throw new Error(notThrough);
+	if (misfiled(root, indexDocuments(root)).findings.length) throw new Error(misfiledFirst("publish"));
+	const stale = findingsStale(root, "publish");
+	if (stale) throw new Error(stale);
+	const files = clientFiles({
+		read: (name) => readBuiltMapFile(root, name),
+		list: (folder) => listBuiltMapFolder(root, folder),
+		where
+	});
+	if (files.json["bundle.json"].preview !== void 0) throw new Error(`The map in ${where}/ was built to preview draft decisions. Press Analyse to build it from accepted decisions only, then publish.`);
+	return files;
+}
+/** The published versions, which one is live on staging and for the client, for Versions, Publish and the sidebar. */
+async function versionsForPage() {
+	const nothing = {
+		live: null,
+		liveKind: null,
+		production: {
+			live: null,
+			kind: null
+		},
+		latest: null,
+		versions: []
+	};
+	const call = await signedInCall().catch(() => null);
+	if (!call) return nothing;
+	return listVersions(call).then(({ live, liveKind, production, latest, published }) => ({
+		live,
+		liveKind,
+		production,
+		latest,
+		versions: published
+	})).catch(() => nothing);
+}
+async function publish(note) {
+	const client = await workingStateClient();
+	const call = await signedInCall();
+	const building = buildRunning();
+	if (building) throw new Error(`${building} is building the map. Publish once it's done.`);
+	await refreshFilings(call);
+	const { json, covers } = builtFiles();
+	const files = [...Object.entries(json).map(([name, value]) => {
+		const bytes = Buffer.from(JSON.stringify(value));
+		return {
+			path: name,
+			bytes,
+			sha256: hash(bytes),
+			contentType: "application/json"
+		};
+	}), ...Object.entries(covers).map(([name, bytes]) => ({
+		path: name,
+		bytes,
+		sha256: hash(bytes),
+		contentType: "image/jpeg"
+	}))];
+	for (const file of files) if (!VERSION_FILE.test(file.path)) throw new Error(`${file.path} isn't a file a version can hold.`);
+	const root = workingFolderPath();
+	const index = path.join(root, "documents", "index.json");
+	if (!existsSync(index)) throw new Error("Fetch the documents first.");
+	if (!readContextFactors(root)) throw new Error("The context factors aren't in this working folder, so the map would show slugs, not their names. Press Fetch latest, then publish.");
+	const analysed = analysedIds(root, client);
+	const ownIds = clientFindingsIds(root, client);
+	const version = await sendVersion(call, {
+		files,
+		documents: JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(idInTool(doc, ownIds))).map((doc) => doc.sha256),
+		note,
+		workspace: {
+			root,
+			files: await hashFiles(listWorkspace(root, client).files)
+		},
+		onProgress: (done, total, name) => job$1 = {
+			...job$1,
+			done,
+			total,
+			version: name
+		},
+		log: (line) => console.log(`[publish] ${line}`)
+	});
+	job$1 = {
+		...job$1,
+		version
+	};
+}
+async function promote(version) {
+	const result = await promoteVersion(await signedInCall(), version, (copied, left) => promoteJob = {
+		...promoteJob,
+		copied,
+		left
+	});
+	promoteJob = {
+		...promoteJob,
+		kind: result.kind
+	};
+}
+function readJson(req) {
+	return new Promise((resolve, reject) => {
+		const chunks = [];
+		let size = 0;
+		req.on("data", (chunk) => {
+			size += chunk.length;
+			if (size > MAX_BODY) {
+				reject(/* @__PURE__ */ new Error("The request is too large."));
+				req.destroy();
+			} else chunks.push(chunk);
+		});
+		req.on("end", () => {
+			try {
+				resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+			} catch {
+				reject(/* @__PURE__ */ new Error("The request wasn't valid JSON."));
+			}
+		});
+		req.on("error", reject);
+	});
+}
+var json$1 = (res, status, value) => {
+	res.writeHead(status, {
+		"Content-Type": "application/json",
+		"Cache-Control": "no-store",
+		"X-Content-Type-Options": "nosniff"
+	});
+	res.end(JSON.stringify(value));
+};
+/** /api/versions, /api/publish and /api/promote (start, and how it's going) and /api/rollback. Changes only from the tool's own page. */
+function publishHandler() {
+	const ROUTES = /* @__PURE__ */ new Set([
+		"/api/versions",
+		"/api/publish",
+		"/api/rollback",
+		"/api/promote"
+	]);
+	return (req, res, next) => {
+		const route = (req.url ?? "").split("?")[0];
+		if (!ROUTES.has(route)) return next();
+		if (req.method === "GET" && route !== "/api/rollback") {
+			if (route === "/api/versions") return void versionsForPage().then((value) => json$1(res, 200, value));
+			return json$1(res, 200, route === "/api/promote" ? promoteJob : job$1);
+		}
+		if (req.method !== "POST" || route === "/api/versions") return json$1(res, 405, { error: "Method not allowed" });
+		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json$1(res, 403, { error: "Forbidden" });
+		const busy = job$1.running ? "Publishing is under way" : promoteJob.running ? "Promoting is under way" : archiveBusy() ? "Archiving is under way" : null;
+		if (route === "/api/rollback") {
+			if (busy) return json$1(res, 409, { error: `${busy}: roll back once it's done.` });
+			readJson(req).then(async (body) => rollbackStaging(await signedInCall(), String(body.version ?? ""))).then((value) => json$1(res, 200, value)).catch((error) => {
+				console.error(`[rollback] ${error.message}`);
+				json$1(res, 400, { error: error.message });
+			});
+			return;
+		}
+		if (busy) return json$1(res, 409, { error: `${busy}: try again once it's done.` });
+		if (route === "/api/promote") {
+			promoteJob = {
+				running: true,
+				copied: 0,
+				left: 0
+			};
+			readJson(req).then((body) => {
+				const version = String(body?.version ?? "");
+				promoteJob = {
+					...promoteJob,
+					version
+				};
+				return promote(version);
+			}).then(() => promoteJob = {
+				...promoteJob,
+				running: false
+			}).catch((error) => {
+				console.error(`[promote] ${error.message}`);
+				promoteJob = {
+					...promoteJob,
+					running: false,
+					error: error.message
+				};
+			});
+			return json$1(res, 202, promoteJob);
+		}
+		job$1 = {
+			running: true,
+			done: 0,
+			total: 0
+		};
+		readJson(req).then((body) => {
+			const { note } = body ?? {};
+			return publish(typeof note === "string" ? note : "");
+		}).then(() => job$1 = {
+			...job$1,
+			running: false
+		}).catch((error) => {
+			const message = error instanceof SyntaxError ? "A file in the working folder isn't valid JSON, so nothing was published. Fix or remove it, then publish." : error.message;
+			console.error(`[publish] ${error instanceof SyntaxError ? error.name : message}`);
+			job$1 = {
+				...job$1,
+				running: false,
+				error: message
+			};
+		});
+		return json$1(res, 202, job$1);
+	};
+}
+//#endregion
 //#region map-preview.ts
 var MAP_DIR = path.resolve(import.meta.dirname, "../map");
 var MAP_POLICY = [
@@ -5256,14 +5795,14 @@ var IDLE = {
 	skipped: 0,
 	notes: []
 };
-var job$1 = IDLE;
+var job = IDLE;
 var claude = null;
 var signInCheck = null;
 var stopping = false;
 var usedKey = null;
 var keptAside = null;
 var plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
-var json$1 = (res, status, value) => {
+var json = (res, status, value) => {
 	res.writeHead(status, {
 		"Content-Type": "application/json",
 		"Cache-Control": "no-store",
@@ -5358,7 +5897,7 @@ async function analyse(landscapeDir, everything) {
 		if (signIn === "not-plan") throw new Error(`The claude command is signed in through an API key, not a Claude plan, so nothing was read: nothing here may use one. In Terminal, run ${commandFor(claudeCommand)} auth logout, then ${commandFor(claudeCommand)} auth login, and choose your Claude account. Then press Analyse again.`);
 		if (signIn === "signed-out") throw new Error(`${auth.loggedIn ? "The claude command's sign-in has expired" : "The claude command isn't signed in"}, so nothing was read. ${signInFix(claudeCommand)} Then press Analyse again.`);
 	}
-	job$1 = {
+	job = {
 		...IDLE,
 		running: true,
 		step: "converting",
@@ -5424,7 +5963,7 @@ async function analyse(landscapeDir, everything) {
 				words: 0,
 				unreadable: each.unreadable ?? "There's no text in it, so it may be a scan."
 			};
-			job$1.skipped++;
+			job.skipped++;
 			continue;
 		}
 		const words = parts.reduce((sum, part) => sum + wordCount(part), 0);
@@ -5486,7 +6025,7 @@ async function analyse(landscapeDir, everything) {
 			readBy: READ_BY_TOOL
 		})));
 	}
-	if (job$1.skipped) notes.push(`${plural(job$1.skipped, "document", "documents")} couldn't be turned into text (Documents says why). Reanalyse everything tries them again.`);
+	if (job.skipped) notes.push(`${plural(job.skipped, "document", "documents")} couldn't be turned into text (Documents says why). Reanalyse everything tries them again.`);
 	if (keptAsTheyWere) notes.push(`${plural(keptAsTheyWere, "document", "documents")} with findings had no text to read again, so ${keptAsTheyWere === 1 ? "it keeps its" : "they keep their"} findings.`);
 	let inFull = /* @__PURE__ */ new Set();
 	if (docs.length) {
@@ -5497,8 +6036,8 @@ async function analyse(landscapeDir, everything) {
 			flag: "wx"
 		});
 		cpSync(path.join(landscape, "context-factors.json"), path.join(evidence, "context-factors.json"));
-		job$1 = {
-			...job$1,
+		job = {
+			...job,
 			step: "reading",
 			documentIds: docs.map((doc) => doc.id),
 			parts: lines.public.length + lines.client.length
@@ -5524,8 +6063,8 @@ async function analyse(landscapeDir, everything) {
 		if (partlyNew) notes.push(`${plural(partlyNew, "new document wasn't", "new documents weren't")} read in full, so ${partlyNew === 1 ? "it's" : "they're"} still new. Analyse again to read ${partlyNew === 1 ? "it" : "them"}.`);
 		if (partly.length - partlyNew) notes.push(`${plural(partly.length - partlyNew, "document wasn't", "documents weren't")} read in full, so ${partly.length - partlyNew === 1 ? "it keeps its" : "they keep their"} earlier findings.`);
 	}
-	job$1 = {
-		...job$1,
+	job = {
+		...job,
 		step: "building"
 	};
 	if (!existsSync(path.join(evidence, "doc-meta.json"))) writeFileSync(path.join(evidence, "doc-meta.json"), "{}\n", { mode: 384 });
@@ -5591,8 +6130,8 @@ async function analyse(landscapeDir, everything) {
 		force: true
 	});
 	keptAside = null;
-	job$1 = {
-		...job$1,
+	job = {
+		...job,
 		notes
 	};
 }
@@ -5643,8 +6182,8 @@ async function readParts({ root, client, route, docs, mine, lines, claudeCommand
 		const { written } = readHere();
 		const done = docs.filter((doc) => expected.get(doc.id)?.every((name) => written.has(name)));
 		const partsRead = [...expected.values()].flat().filter((name) => written.has(name)).length;
-		job$1 = {
-			...job$1,
+		job = {
+			...job,
 			partsRead,
 			finished: done.length,
 			documentIds: [...done.map((doc) => doc.id), ...docs.filter((doc) => !done.includes(doc)).map((doc) => doc.id)]
@@ -5741,35 +6280,35 @@ function analysisHandler(landscapeDir) {
 	return (req, res, next) => {
 		const route = (req.url ?? "").split("?")[0];
 		if (route !== "/api/analyse" && route !== "/api/analyse/stop") return next();
-		if (req.method === "GET" && route === "/api/analyse") return json$1(res, 200, job$1);
-		if (req.method !== "POST") return json$1(res, 405, { error: "Method not allowed" });
-		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json$1(res, 403, { error: "Forbidden" });
+		if (req.method === "GET" && route === "/api/analyse") return json(res, 200, job);
+		if (req.method !== "POST") return json(res, 405, { error: "Method not allowed" });
+		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json(res, 403, { error: "Forbidden" });
 		if (route === "/api/analyse/stop") {
-			if (job$1.running) stopping = true;
+			if (job.running) stopping = true;
 			signInCheck?.abort();
 			if (claude?.pid) try {
 				process.kill(-claude.pid, "SIGTERM");
 			} catch {}
-			return json$1(res, 202, job$1);
+			return json(res, 202, job);
 		}
-		if (job$1.running) return json$1(res, 409, { error: "An analysis is already running." });
-		if (archiveBusy()) return json$1(res, 409, { error: "Wait for Archive to finish, then analyse." });
+		if (job.running) return json(res, 409, { error: "An analysis is already running." });
+		if (archiveBusy()) return json(res, 409, { error: "Wait for Archive to finish, then analyse." });
 		readBody(req).then((body) => {
-			if (job$1.running) return json$1(res, 409, { error: "An analysis is already running." });
-			if (archiveBusy()) return json$1(res, 409, { error: "Wait for Archive to finish, then analyse." });
+			if (job.running) return json(res, 409, { error: "An analysis is already running." });
+			if (archiveBusy()) return json(res, 409, { error: "Wait for Archive to finish, then analyse." });
 			const everything = body.everything === true;
 			stopping = false;
 			usedKey = null;
 			keptAside = null;
-			job$1 = {
+			job = {
 				...IDLE,
 				running: true,
 				step: "converting",
 				everything
 			};
 			const landscape = path.join(workingFolderPath(), "landscape");
-			withBuild("Analyse", () => analyse(landscapeDir, everything)).then(() => job$1 = {
-				...job$1,
+			withBuild("Analyse", () => analyse(landscapeDir, everything)).then(() => job = {
+				...job,
 				running: false,
 				step: "done"
 			}).catch((error) => {
@@ -5784,327 +6323,16 @@ function analysisHandler(landscapeDir) {
 					writeFileSync(path.join(landscape, "evidence", "runs", "current", "error.txt"), message, { mode: 384 });
 				} catch {}
 				if (keptAside) keepPrevious(keptAside.root, keptAside.client, true);
-				job$1 = {
-					...job$1,
+				job = {
+					...job,
 					running: false,
 					step: stopping ? "stopped" : "failed",
 					error: message,
 					notes: []
 				};
 			});
-			json$1(res, 202, job$1);
+			json(res, 202, job);
 		});
-	};
-}
-//#endregion
-//#region standalone/publish.ts
-var VERSION_FILE = /^(bundle\.json|docs\.json|growth\.json|presence\.json|similarity\.json|evidence\/[a-z0-9][a-z0-9-]{0,79}\.json|covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg)$/;
-var COVER = /^covers\/[a-z0-9][a-z0-9-]{0,79}\.jpg$/;
-var LAYERS = [
-	"growth.json",
-	"presence.json",
-	"similarity.json"
-];
-var MAX_BODY = 65536;
-var hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
-var job = {
-	running: false,
-	done: 0,
-	total: 0
-};
-var promoteJob = {
-	running: false,
-	copied: 0,
-	left: 0
-};
-/** What this page's publish or promote is in the middle of, for Fetch latest to wait for; null when neither is running. */
-var publishBusy = () => job.running ? "publishing" : promoteJob.running ? "promoting" : null;
-var isRow = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var rows = (value) => Array.isArray(value) ? value.filter(isRow) : [];
-/**
-* The built map's files as the client gets them: without the build's working fields, which the admin Worker refuses
-* (apps/admin/src/checks.js). A market added from evidence is marked `fromEvidence` (the build says `minted`), a
-* licensed document `licensed` (`internal`); archetypes and hidden-passage counts are left out. A document keeps its
-* cover only when the cover's file goes in the version too. The map page reads both spellings.
-*/
-function publishedFiles(bundle, docs, evidence, covers = /* @__PURE__ */ new Set()) {
-	const subthemes = Object.fromEntries(Object.entries(isRow(bundle.subthemes) ? bundle.subthemes : {}).map(([industry, markets]) => [industry, rows(markets).map(({ minted, archetype: _archetype, ...market }) => ({
-		...market,
-		fromEvidence: Boolean(minted)
-	}))]));
-	const documents = Object.fromEntries(Object.entries(isRow(docs.docs) ? docs.docs : {}).map(([id, doc]) => {
-		const { internal, ...rest } = isRow(doc) ? doc : {};
-		const cover = typeof rest.cover === "string" && covers.has(rest.cover) ? rest.cover : null;
-		return [id, {
-			...rest,
-			cover,
-			licensed: Boolean(internal)
-		}];
-	}));
-	const shown = Object.entries(evidence).map(([slug, file]) => [`evidence/${slug}.json`, {
-		...file,
-		topics: rows(file.topics).map(({ internalOnly: _hidden, ...topic }) => topic)
-	}]);
-	return {
-		"bundle.json": {
-			...bundle,
-			subthemes
-		},
-		"docs.json": {
-			...docs,
-			docs: documents
-		},
-		...Object.fromEntries(shown)
-	};
-}
-/** The map the build last made, from the working folder, ready to publish: its JSON files and its covers' bytes. */
-function builtFiles() {
-	clientId();
-	const root = workingFolder();
-	const where = root ? path.relative(root, builtMapPath(root)) : "landscape/map";
-	const parse = (bytes) => {
-		if (!bytes) return null;
-		try {
-			const value = JSON.parse(bytes.toString("utf8"));
-			return isRow(value) ? value : null;
-		} catch {
-			return null;
-		}
-	};
-	const read = (name) => root ? parse(readBuiltMapFile(root, name)) : null;
-	const bundle = read("bundle.json");
-	const docs = read("docs.json");
-	if (!root || !bundle || !docs) throw new Error(`There's no built map in the working folder (${where}/). Press Analyse to build it, then publish.`);
-	const open = openDecisions(root);
-	if (open > 0) throw new Error(`${open === 1 ? "An edit" : `${open} edits`} in Industries and markets ${open === 1 ? "isn't" : "aren't"} validated yet. Validate the markets, then publish.`);
-	const building = buildRunning();
-	if (building) throw new Error(`${building} is building the map. Publish once it's done.`);
-	const accepts = acceptIds(root);
-	const settings = mapSettingsHash(root);
-	const rules = rulesHash(root);
-	const built = builtWith(root);
-	if ((accepts.length || settings || rules || built?.settings || built?.rules) && (!built || accepts.some((id) => !built.accepts.has(id)) || built.settings !== settings || built.rules !== rules)) throw new Error("The map wasn't built all the way through with the latest validated edits and settings. Validate the markets again to rebuild it (and Analyse again if the reading rules changed), then publish.");
-	if (misfiled(root, indexDocuments(root)).findings.length) throw new Error(misfiledFirst("publish"));
-	if (built && findingsChangedSince(root, clientId(), built)) throw new Error("Rebuild the map first: the findings changed since it was built. Press Rebuild map in Data, then publish.");
-	if (bundle.preview !== void 0) throw new Error(`The map in ${where}/ was built to preview draft decisions. Press Analyse to build it from accepted decisions only, then publish.`);
-	const evidence = {};
-	const shown = new Set((Array.isArray(bundle.themes) ? bundle.themes : []).map((theme) => isRow(theme) ? theme.slug : null));
-	for (const name of listBuiltMapFolder(root, "evidence")) {
-		const slug = name.replace(/\.json$/, "");
-		if (!shown.has(slug)) continue;
-		if (!/^[a-z0-9][a-z0-9-]{0,79}\.json$/.test(name)) throw new Error(`${where}/evidence/${name} isn't a file a version can hold.`);
-		const file = read(`evidence/${name}`);
-		if (!file) throw new Error(`${where}/evidence/${name} couldn't be read. Press Analyse to build the map again.`);
-		evidence[slug] = file;
-	}
-	const layers = {};
-	for (const name of LAYERS) {
-		const bytes = readBuiltMapFile(root, name);
-		if (!bytes) continue;
-		const layer = parse(bytes);
-		if (!layer) throw new Error(`${where}/${name} couldn't be read. Press Analyse to build the map again.`);
-		layers[name] = layer;
-	}
-	const covers = {};
-	for (const doc of Object.values(isRow(docs.docs) ? docs.docs : {})) {
-		const cover = isRow(doc) ? doc.cover : null;
-		if (typeof cover !== "string" || !COVER.test(cover) || covers[cover]) continue;
-		const bytes = readBuiltMapFile(root, cover);
-		if (bytes) covers[cover] = bytes;
-	}
-	return {
-		json: {
-			...publishedFiles(bundle, docs, evidence, new Set(Object.keys(covers))),
-			...layers
-		},
-		covers
-	};
-}
-/** The published versions, which one is live on staging and for the client, for Versions, Publish and the sidebar. */
-async function versionsForPage() {
-	const nothing = {
-		live: null,
-		liveKind: null,
-		production: {
-			live: null,
-			kind: null
-		},
-		latest: null,
-		versions: []
-	};
-	const call = await signedInCall().catch(() => null);
-	if (!call) return nothing;
-	return listVersions(call).then(({ live, liveKind, production, latest, published }) => ({
-		live,
-		liveKind,
-		production,
-		latest,
-		versions: published
-	})).catch(() => nothing);
-}
-async function publish(note) {
-	const client = await workingStateClient();
-	const call = await signedInCall();
-	const building = buildRunning();
-	if (building) throw new Error(`${building} is building the map. Publish once it's done.`);
-	await refreshFilings(call);
-	const { json, covers } = builtFiles();
-	const files = [...Object.entries(json).map(([name, value]) => {
-		const bytes = Buffer.from(JSON.stringify(value));
-		return {
-			path: name,
-			bytes,
-			sha256: hash(bytes),
-			contentType: "application/json"
-		};
-	}), ...Object.entries(covers).map(([name, bytes]) => ({
-		path: name,
-		bytes,
-		sha256: hash(bytes),
-		contentType: "image/jpeg"
-	}))];
-	for (const file of files) if (!VERSION_FILE.test(file.path)) throw new Error(`${file.path} isn't a file a version can hold.`);
-	const root = workingFolderPath();
-	const index = path.join(root, "documents", "index.json");
-	if (!existsSync(index)) throw new Error("Fetch the documents first.");
-	if (!readContextFactors(root)) throw new Error("The context factors aren't in this working folder, so the map would show slugs, not their names. Press Fetch latest, then publish.");
-	const analysed = analysedIds(root, client);
-	const ownIds = clientFindingsIds(root, client);
-	const version = await sendVersion(call, {
-		files,
-		documents: JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(idInTool(doc, ownIds))).map((doc) => doc.sha256),
-		note,
-		workspace: {
-			root,
-			files: await hashFiles(listWorkspace(root, client).files)
-		},
-		onProgress: (done, total, name) => job = {
-			...job,
-			done,
-			total,
-			version: name
-		},
-		log: (line) => console.log(`[publish] ${line}`)
-	});
-	job = {
-		...job,
-		version
-	};
-}
-async function promote(version) {
-	const result = await promoteVersion(await signedInCall(), version, (copied, left) => promoteJob = {
-		...promoteJob,
-		copied,
-		left
-	});
-	promoteJob = {
-		...promoteJob,
-		kind: result.kind
-	};
-}
-function readJson(req) {
-	return new Promise((resolve, reject) => {
-		const chunks = [];
-		let size = 0;
-		req.on("data", (chunk) => {
-			size += chunk.length;
-			if (size > MAX_BODY) {
-				reject(/* @__PURE__ */ new Error("The request is too large."));
-				req.destroy();
-			} else chunks.push(chunk);
-		});
-		req.on("end", () => {
-			try {
-				resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-			} catch {
-				reject(/* @__PURE__ */ new Error("The request wasn't valid JSON."));
-			}
-		});
-		req.on("error", reject);
-	});
-}
-var json = (res, status, value) => {
-	res.writeHead(status, {
-		"Content-Type": "application/json",
-		"Cache-Control": "no-store",
-		"X-Content-Type-Options": "nosniff"
-	});
-	res.end(JSON.stringify(value));
-};
-/** /api/versions, /api/publish and /api/promote (start, and how it's going) and /api/rollback. Changes only from the tool's own page. */
-function publishHandler() {
-	const ROUTES = /* @__PURE__ */ new Set([
-		"/api/versions",
-		"/api/publish",
-		"/api/rollback",
-		"/api/promote"
-	]);
-	return (req, res, next) => {
-		const route = (req.url ?? "").split("?")[0];
-		if (!ROUTES.has(route)) return next();
-		if (req.method === "GET" && route !== "/api/rollback") {
-			if (route === "/api/versions") return void versionsForPage().then((value) => json(res, 200, value));
-			return json(res, 200, route === "/api/promote" ? promoteJob : job);
-		}
-		if (req.method !== "POST" || route === "/api/versions") return json(res, 405, { error: "Method not allowed" });
-		if (req.headers.origin !== `http://${req.headers.host}` || !(req.headers["content-type"] ?? "").startsWith("application/json")) return json(res, 403, { error: "Forbidden" });
-		const busy = job.running ? "Publishing is under way" : promoteJob.running ? "Promoting is under way" : archiveBusy() ? "Archiving is under way" : null;
-		if (route === "/api/rollback") {
-			if (busy) return json(res, 409, { error: `${busy}: roll back once it's done.` });
-			readJson(req).then(async (body) => rollbackStaging(await signedInCall(), String(body.version ?? ""))).then((value) => json(res, 200, value)).catch((error) => {
-				console.error(`[rollback] ${error.message}`);
-				json(res, 400, { error: error.message });
-			});
-			return;
-		}
-		if (busy) return json(res, 409, { error: `${busy}: try again once it's done.` });
-		if (route === "/api/promote") {
-			promoteJob = {
-				running: true,
-				copied: 0,
-				left: 0
-			};
-			readJson(req).then((body) => {
-				const version = String(body?.version ?? "");
-				promoteJob = {
-					...promoteJob,
-					version
-				};
-				return promote(version);
-			}).then(() => promoteJob = {
-				...promoteJob,
-				running: false
-			}).catch((error) => {
-				console.error(`[promote] ${error.message}`);
-				promoteJob = {
-					...promoteJob,
-					running: false,
-					error: error.message
-				};
-			});
-			return json(res, 202, promoteJob);
-		}
-		job = {
-			running: true,
-			done: 0,
-			total: 0
-		};
-		readJson(req).then((body) => {
-			const { note } = body ?? {};
-			return publish(typeof note === "string" ? note : "");
-		}).then(() => job = {
-			...job,
-			running: false
-		}).catch((error) => {
-			const message = error instanceof SyntaxError ? "A file in the working folder isn't valid JSON, so nothing was published. Fix or remove it, then publish." : error.message;
-			console.error(`[publish] ${error instanceof SyntaxError ? error.name : message}`);
-			job = {
-				...job,
-				running: false,
-				error: message
-			};
-		});
-		return json(res, 202, job);
 	};
 }
 //#endregion
@@ -6749,6 +6977,48 @@ async function pullDevCommand() {
 		return 1;
 	}
 }
+/**
+* The client's built map, as Publish would send it, into a new folder outside git (client-map.ts), for the dev link
+* (16 Nov 2026). It reads the working folder (PATHWAYS_WORKSPACE, else the usual one). Like Publish, it needs the map
+* built all the way through with the folder's validated edits, settings and findings; unlike Publish, open draft edits
+* don't stop it, and a preview build's draft-set names are left out. Nothing goes to Cloudflare.
+*/
+async function exportMapCommand() {
+	const folder = process.argv[3];
+	if (!folder) {
+		console.log("Usage: pathways export-map <new or empty folder>");
+		return 1;
+	}
+	try {
+		const root = workingFolderPath();
+		assertOutsideGit(root);
+		if (!clientId()) {
+			const landscape = path.join(root, "landscape");
+			const maps = existsSync(landscape) ? readdirSync(landscape).filter((name) => /^map-[a-z0-9][a-z0-9-]*$/.test(name)) : [];
+			if (maps.length !== 1) throw new Error(maps.length ? "This working folder holds more than one client's map: set PATHWAYS_CLIENT to the one to export." : "This working folder has no client's map (landscape/map-<client>/): build it first, or set PATHWAYS_CLIENT.");
+			process.env.PATHWAYS_CLIENT = maps[0].slice(4);
+			clientId();
+		}
+		const target = path.resolve(folder);
+		let existing = target;
+		while (!existsSync(existing)) existing = path.dirname(existing);
+		assertOutsideGit(existing);
+		const stale = buildNotThrough(root, "export it") ?? findingsStale(root, "export it");
+		const where = path.relative(root, builtMapPath(root));
+		const written = writeClientFiles(target, exportFiles({
+			read: (name) => readBuiltMapFile(root, name),
+			list: (inside) => listBuiltMapFolder(root, inside),
+			where,
+			stale
+		}));
+		assertOutsideGit(target);
+		console.log(`Wrote the client's map (${written} files, from ${where}/) to ${target}, as Publish would send it. Nothing went to Cloudflare.`);
+		return 0;
+	} catch (error) {
+		console.log(error.message);
+		return 1;
+	}
+}
 async function restoreDevCommand() {
 	try {
 		const id = process.argv[3];
@@ -6846,6 +7116,7 @@ var command = {
 	"push-dev": pushDevCommand,
 	"pull-dev": pullDevCommand,
 	"dev-snapshots": devSnapshotsCommand,
+	"export-map": exportMapCommand,
 	"restore-dev": restoreDevCommand,
 	"library-plan": libraryPlanCommand,
 	"upload-library": uploadLibraryCommand,
@@ -6858,7 +7129,7 @@ var command = {
 	}
 }[process.argv[2] ?? ""];
 if (!command) {
-	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | file-as-client [sha256…] | push-dev [folder] [--first] | pull-dev [folder] [snapshot] [--all] | dev-snapshots | restore-dev <snapshot> | library-plan [folder] | upload-library [folder] | rekey-library [folder] [--apply]");
+	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | file-as-client [sha256…] | push-dev [folder] [--first] | pull-dev [folder] [snapshot] [--all] | dev-snapshots | export-map <new or empty folder> | restore-dev <snapshot> | library-plan [folder] | upload-library [folder] | rekey-library [folder] [--apply]");
 	process.exit(1);
 }
 process.exit(await command());
