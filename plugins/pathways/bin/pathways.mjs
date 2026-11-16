@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { accessSync, closeSync, constants, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { open } from "node:fs/promises";
 import { once } from "node:events";
 import { Readable } from "node:stream";
@@ -843,7 +844,7 @@ var SKIP = /* @__PURE__ */ new Set([
 	"Thumbs.db"
 ]);
 var SCRATCH = /-(wal|shm|journal)$/;
-var SHA256$2 = /^[0-9a-f]{64}$/;
+var SHA256$3 = /^[0-9a-f]{64}$/;
 var SNAPSHOT_ID = /^\d{8}T\d{9}Z$/;
 var NOTE = ".pathways-dev.json";
 var TMP$1 = ".pathways-dev-tmp";
@@ -861,7 +862,7 @@ function readNote(root) {
 	} catch {
 		throw new Error(`${NOTE} in the folder isn't readable: remove it, then pull into an empty folder.`);
 	}
-	if (!(note && SNAPSHOT_ID.test(note.snapshot) && (note.scope === "light" || note.scope === "all") && note.files && typeof note.files === "object" && Object.entries(note.files).every(([file, sha256]) => !pathProblem(file) && SHA256$2.test(sha256)))) throw new Error(`${NOTE} in the folder isn't in the expected shape: remove it, then pull into an empty folder.`);
+	if (!(note && SNAPSHOT_ID.test(note.snapshot) && (note.scope === "light" || note.scope === "all") && note.files && typeof note.files === "object" && Object.entries(note.files).every(([file, sha256]) => !pathProblem(file) && SHA256$3.test(sha256)))) throw new Error(`${NOTE} in the folder isn't in the expected shape: remove it, then pull into an empty folder.`);
 	return note;
 }
 /** Writes a file whole: through a .part file made fresh (never through a link), then renamed into place. */
@@ -1109,7 +1110,7 @@ async function readSnapshot(call, id) {
 	const bytes = Buffer.from(await response.arrayBuffer());
 	if (createHash("sha256").update(bytes).digest("hex") !== response.headers.get("X-Content-SHA256")) throw new Error("The snapshot didn't match its checksum.");
 	const snapshot = JSON.parse(bytes.toString("utf8"));
-	if (!(Array.isArray(snapshot.files) && snapshot.files.every((file) => !pathProblem(file.path) && SHA256$2.test(file.sha256) && Number.isSafeInteger(file.bytes) && file.bytes >= 0))) throw new Error("The snapshot wasn't in the expected shape.");
+	if (!(Array.isArray(snapshot.files) && snapshot.files.every((file) => !pathProblem(file.path) && SHA256$3.test(file.sha256) && Number.isSafeInteger(file.bytes) && file.bytes >= 0))) throw new Error("The snapshot wasn't in the expected shape.");
 	return snapshot;
 }
 /** Refuses a path whose folders, or the file itself, are links: a write must never be sent somewhere else, such as a repo. */
@@ -1534,7 +1535,7 @@ async function promoteVersion(call, version, onProgress = () => {}) {
 //#region standalone/fetch.ts
 /** What the folder is in step with: the version and working state last fetched, and every file as it came down. */
 var VERSION_NOTE = ".pathways-version.json";
-var SHA256$1 = /^[0-9a-f]{64}$/;
+var SHA256$2 = /^[0-9a-f]{64}$/;
 var VERSION = /^v\d{4}$/;
 var TMP = ".pathways-fetch-tmp";
 var BY_DOCUMENT = /* @__PURE__ */ new Set(["landscape/evidence/text.json", "landscape/evidence/doc-meta.json"]);
@@ -1652,7 +1653,7 @@ function moveAside(root, at = /* @__PURE__ */ new Date()) {
 }
 async function documentList(call) {
 	const { documents } = await (await ok$1(await call("/v0/documents"))).json();
-	if (!(Array.isArray(documents) && documents.every((doc) => SHA256$1.test(doc?.sha256) && typeof doc.filename === "string"))) throw new Error("The document list wasn't in the expected shape.");
+	if (!(Array.isArray(documents) && documents.every((doc) => SHA256$2.test(doc?.sha256) && typeof doc.filename === "string" && (doc.clientFiledAt == null || typeof doc.clientFiledAt === "string")))) throw new Error("The document list wasn't in the expected shape.");
 	return documents;
 }
 /**
@@ -1669,7 +1670,7 @@ async function readWorkingState(call, version, sha256, clientId) {
 		const saved = JSON.parse(bytes.toString("utf8"));
 		if (saved.version === version && Array.isArray(saved.files)) files = saved.files;
 	} catch {}
-	const valid = files?.every((file) => typeof file?.path === "string" && SHA256$1.test(file.sha256) && Number.isSafeInteger(file.bytes) && file.bytes >= 0);
+	const valid = files?.every((file) => typeof file?.path === "string" && SHA256$2.test(file.sha256) && Number.isSafeInteger(file.bytes) && file.bytes >= 0);
 	if (!files || !valid) throw new Error(`${version}'s working state wasn't in the expected shape, so nothing was written.`);
 	if (files.some((file) => workspacePathProblem(file.path, clientId) !== null)) throw new Error(`${version}'s working state names a file this tool doesn't take for this client, so nothing was written.`);
 	if (new Set(files.map((file) => sameOnDisk(file.path))).size !== files.length) throw new Error(`${version}'s working state has two paths that differ only in case, which this disk can't hold apart, so nothing was written.`);
@@ -1763,8 +1764,8 @@ function readVersionNote(root, clientId) {
 	if (!lstatSync(file, { throwIfNoEntry: false })?.isFile()) return null;
 	try {
 		const note = JSON.parse(readFileSync(file, "utf8"));
-		if (!VERSION.test(note.version) || !SHA256$1.test(note.workspace) || !isObject(note.files)) return null;
-		const files = Object.entries(note.files).filter(([path, sha256]) => typeof sha256 === "string" && SHA256$1.test(sha256) && workspacePathProblem(path, clientId) === null);
+		if (!VERSION.test(note.version) || !SHA256$2.test(note.workspace) || !isObject(note.files)) return null;
+		const files = Object.entries(note.files).filter(([path, sha256]) => typeof sha256 === "string" && SHA256$2.test(sha256) && workspacePathProblem(path, clientId) === null);
 		return {
 			...note,
 			files: Object.fromEntries(files)
@@ -2340,7 +2341,7 @@ async function uploadLibrary({ root, call, client, licensed, log = () => {}, par
 }
 //#endregion
 //#region standalone/incremental.ts
-var SHA256 = /^[0-9a-f]{64}$/;
+var SHA256$1 = /^[0-9a-f]{64}$/;
 var TEXT_MAX = 20971520;
 /** What a run's own part outputs are marked with in docs-v2.json, so a handover document is never taken for one. */
 var READ_BY_TOOL = "tool";
@@ -2443,13 +2444,14 @@ function clientFindingsIds(root, client) {
 	if (!isDir(dir)) return /* @__PURE__ */ new Set();
 	return new Set(readdirSync(dir).filter((name) => CLIENT_ID.test(name)).flatMap((name) => [...findingsByDoc(folders(root, "client", name).findings).keys()]));
 }
-/**
-* A document's id in the tool. One Cloudflare labels public or licensed but whose findings sit in the client's own
-* pipeline (`clientIds`, from clientFindingsIds) is the client's: the handover filed it there, the client's map counts
-* it, and reading it again as public would put the client's material in the base map (13 Nov 2026).
-*/
-var filedAsClient = (doc, clientIds) => doc.confidentiality !== "client" && clientIds.has(documentId(doc.sha256, "client"));
+var filedAsClient = (doc, clientIds) => doc.confidentiality !== "client" && (Boolean(doc.clientFiledAt) || clientIds.has(documentId(doc.sha256, "client")));
 var idInTool = (doc, clientIds) => documentId(doc.sha256, filedAsClient(doc, clientIds) ? "client" : doc.confidentiality);
+/**
+* The client's by this folder's findings alone: Cloudflare hasn't filed it. A laptop without the findings reads it as
+* public, and so does this one once they're gone (archived, then Analyse clears them), so Analyse waits for
+* `pathways file-as-client` (Oliver, 13 Nov 2026).
+*/
+var filedByFolderOnly = (doc, clientIds) => filedAsClient(doc, clientIds) && !doc.clientFiledAt;
 /** Ids a pipeline's text.json records as unreadable. */
 var unreadableIn = (file) => new Set(Object.entries(readJson$2(file, {})).filter(([, entry]) => entry?.unreadable).map(([id]) => id));
 /** documents/index.json's list (written by Fetch latest), or none before the first fetch. */
@@ -2509,10 +2511,12 @@ function planRun(root, client, documents, everything = false) {
 		misfiledLeftovers: left.leftovers,
 		misfiledIds: left.findingsIds,
 		clientWithoutId: [],
-		unknownLevel: []
+		unknownLevel: [],
+		unfiled: []
 	};
 	for (const doc of documents) {
-		if (!SHA256.test(doc.sha256)) throw new Error("The document list wasn't in the expected shape: fetch the latest, then try again.");
+		if (!SHA256$1.test(doc.sha256)) throw new Error("The document list wasn't in the expected shape: fetch the latest, then try again.");
+		if (filedByFolderOnly(doc, ownIds)) plan.unfiled.push(documentId(doc.sha256, "client"));
 		const asClient = filedAsClient(doc, ownIds);
 		const id = idInTool(doc, ownIds);
 		const route = asClient ? "client" : routeOf(doc.confidentiality);
@@ -2717,6 +2721,7 @@ function analysisSummary(root, client, documents, built) {
 		everything: [...plan.everything.map((each) => each.id), ...plan.clientWithoutId],
 		unreadable: plan.unreadable.length,
 		handover: plan.handover.length,
+		unfiled: plan.unfiled.length,
 		rebuildDue: tidyDue || stale,
 		tidyDue,
 		structureChanged: Boolean(last && now && last !== now)
@@ -2853,7 +2858,7 @@ function textSource(root, client, planned) {
 			file
 		};
 	}
-	if (typeof planned.doc.textSha256 === "string" && SHA256.test(planned.doc.textSha256)) return {
+	if (typeof planned.doc.textSha256 === "string" && SHA256$1.test(planned.doc.textSha256)) return {
 		kind: "cloudflare",
 		textSha256: planned.doc.textSha256
 	};
@@ -3039,7 +3044,7 @@ async function prepareTexts({ root, client, read, call, convert = pagesOf, macos
 	const items = routes.flatMap((route) => Object.entries(queues[route]).flatMap(([id, entry]) => {
 		const file = path.join(folders(root, route, client).text, `${id}.txt`);
 		const idOk = (sha256, confidentiality) => documentId(sha256, confidentiality) === id || route === "client" && documentId(sha256, "client") === id;
-		return entry && SHA256.test(entry.sha256) && typeof entry.confidentiality === "string" && idOk(entry.sha256, entry.confidentiality) && isFile(file) && sha256Of(readFileSync(file)) === entry.textSha256 ? [{
+		return entry && SHA256$1.test(entry.sha256) && typeof entry.confidentiality === "string" && idOk(entry.sha256, entry.confidentiality) && isFile(file) && sha256Of(readFileSync(file)) === entry.textSha256 ? [{
 			id,
 			sha256: entry.sha256,
 			converter: entry.converter,
@@ -3578,10 +3583,15 @@ function fetched(root) {
 	return {
 		documents: documents.map((doc) => {
 			const uploaded = new Date(doc.uploadedAt);
+			const recorded = doc.confidentiality !== "client" && Boolean(doc.clientFiledAt);
 			return {
-				id: documentId(doc.sha256, doc.confidentiality),
+				id: documentId(doc.sha256, recorded ? "client" : doc.confidentiality),
 				name: doc.filename,
-				confidentiality: doc.confidentiality,
+				confidentiality: recorded ? "client" : doc.confidentiality,
+				...recorded ? { clientFiled: {
+					how: "recorded",
+					label: doc.confidentiality
+				} } : {},
 				status: "new",
 				version: doc.lastVersion,
 				markets: 0,
@@ -3724,8 +3734,14 @@ function readWorkspace(root, rules = RULES) {
 		const id = filed ? asClient : doc.id;
 		const found = read.get(id);
 		const readNote = noteFor(id);
-		const byRule = !ownIds.has(id) && internal(id);
-		const level = filed ? { confidentiality: "client" } : byRule ? {
+		const byRule = !doc.clientFiled && !ownIds.has(id) && internal(id);
+		const level = filed ? {
+			confidentiality: "client",
+			clientFiled: {
+				how: "folder",
+				label: doc.confidentiality
+			}
+		} : byRule ? {
 			confidentiality: "licensed",
 			licensedByRule: true
 		} : {};
@@ -4273,20 +4289,133 @@ async function checkSignIn(claude, { timeoutMs = 9e4, env = sessionEnv(), signal
 	};
 }
 //#endregion
+//#region standalone/client-filed.ts
+var SHA256 = /^[0-9a-f]{64}$/;
+/**
+* The documents this working folder takes as the client's but Cloudflare hasn't filed (incremental.ts
+* filedByFolderOnly): labelled public or licensed, not filed, with findings in the client's own pipeline. The
+* configured client's, as Analyse reads it, or with no client id, any client's folder.
+*/
+function unrecorded(root, documents, client) {
+	const own = clientFindingsIds(root, client);
+	return documents.filter((doc) => filedByFolderOnly(doc, own));
+}
+/**
+* What `pathways file-as-client` files: the documents named by `sha256s`, checked against Cloudflare's list, or with
+* none named, the ones this working folder takes as the client's but Cloudflare hasn't filed (unrecorded). Ones filed
+* already are left out and counted.
+*/
+async function filingPlan({ root, call, client, sha256s }) {
+	const documents = await documentList(call);
+	if (documents.some((doc) => !("clientFiledAt" in doc))) throw new Error("The admin Worker can't file documents as the client's yet: it needs its update first, so nothing was filed. Tell a Parallel admin.");
+	if (sha256s.length === 0) return {
+		file: unrecorded(root, documents, client),
+		filedAlready: documents.filter((doc) => doc.confidentiality !== "client" && doc.clientFiledAt).length
+	};
+	const bySha = new Map(documents.map((doc) => [doc.sha256, doc]));
+	const named = [...new Set(sha256s.map((each) => each.toLowerCase()))].map((sha256) => {
+		if (!SHA256.test(sha256)) throw new Error(`${sha256} isn't a document's SHA-256: 64 letters and digits, 0-9 and a-f.`);
+		const doc = bySha.get(sha256);
+		if (!doc) throw new Error(`${sha256} isn't in Cloudflare's document list, so nothing was filed.`);
+		if (doc.confidentiality === "client") throw new Error(`${sha256} is labelled the client's already, so nothing was filed.`);
+		return doc;
+	});
+	return {
+		file: named.filter((doc) => !doc.clientFiledAt),
+		filedAlready: named.filter((doc) => doc.clientFiledAt).length
+	};
+}
+/**
+* Files each document as the client's in the admin Worker, which needs the checkout (the caller holds it). Stops at the
+* first refusal; what was filed before it stays filed. The document list here is left alone: the command runs beside
+* the tool's server, which may be writing it (Fetch latest, Archive), and Analyse, Publish and Fetch latest bring the
+* filings in anyway.
+*/
+async function fileAsClient({ call, documents }) {
+	let filed = 0;
+	try {
+		for (const doc of documents) {
+			await ok$1(await call(`/v0/documents/${doc.sha256}/client-filed`, { method: "POST" }));
+			filed++;
+		}
+	} catch (error) {
+		throw new Error(`Filed ${filed} of ${documents.length}, then the admin Worker refused: ${error.message}`);
+	}
+	return filed;
+}
+/**
+* Brings the filings in this laptop's document list (documents/index.json) in step with Cloudflare's, for Analyse and
+* Publish to take a document filed since the last Fetch latest as the client's. Only the filings change: the rest of
+* the list stays as Fetch latest left it, in step with the working state it brought. A filing is never removed, so
+* one the list has stays. With no list yet, nothing is written: Fetch latest writes it whole. True if it changed.
+*/
+function recordFilings(root, now, outsideGit) {
+	refuseLinks(root, "documents/index.json");
+	const file = path.join(root, "documents", "index.json");
+	if (!existsSync(file)) return false;
+	let listed;
+	try {
+		listed = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		throw new Error("The document list here isn't valid JSON: press Fetch latest, which writes it again.");
+	}
+	if (!listed || !Array.isArray(listed.documents)) throw new Error("The document list here isn't in the expected shape: press Fetch latest, which writes it again.");
+	const filings = new Map(now.filter((doc) => doc.clientFiledAt).map((doc) => [doc.sha256, doc]));
+	let changed = false;
+	const documents = listed.documents.map((doc) => {
+		const filed = filings.get(doc?.sha256);
+		if (!filed || doc.clientFiledAt) return doc;
+		changed = true;
+		return {
+			...doc,
+			clientFiledAt: filed.clientFiledAt,
+			clientFiledBy: filed.clientFiledBy ?? null
+		};
+	});
+	if (!changed) return false;
+	outsideGit(root);
+	writeIndex(root, documents, typeof listed.fetchedAt === "string" ? listed.fetchedAt : void 0);
+	return true;
+}
+//#endregion
 //#region standalone/archive.ts
 var AT_ONCE = 8;
+var counted = (n) => n === 1 ? "1 document" : `${n} documents`;
 /**
 * Archives (or, with `archived` false, restores) the documents the tool knows by `ids` (findings.ts documentId).
 * The Worker needs the checkout, which the caller holds. An id that isn't in the Worker's list stops it before anything
 * changes. Once anything may have changed, the list is updated even when the Worker refuses one or a call fails
 * part-way, so the tool shows what Cloudflare now holds, and why it stopped comes back with the count. `outsideGit`
 * (workspace.ts assertOutsideGit) checks the folder before the list is written, as Fetch latest does.
+*
+* A document labelled public or licensed that the handover filed as the client's loses its handover findings at the
+* next Analyse once archived (13 Nov 2026). Filed in Cloudflare (client-filed.ts), Restore brings it back as the
+* client's, so it's archived only among the `confirmed` ids, the ones the person agreed to on the page. Filed only by
+* this folder's findings (the `client`'s folder, as Analyse reads it), Restore would bring it back as public, so
+* archiving it is refused until it's filed. Either refusal changes nothing in Cloudflare and comes back as the error,
+* with the list's filings brought in step first (client-filed.ts recordFilings): the page asks from its own copy of the
+* list, which may predate a filing, and reloads on this answer, so the next Archive asks.
 */
-async function setArchived({ root, call, ids, archived, outsideGit }) {
-	const byId = new Map((await documentList(call)).flatMap((doc) => [[documentId(doc.sha256, doc.confidentiality), doc], [documentId(doc.sha256, "client"), doc]]));
+async function setArchived({ root, call, client = null, ids, archived, confirmed = [], outsideGit }) {
+	const live = await documentList(call);
+	const byId = new Map(live.flatMap((doc) => [[documentId(doc.sha256, doc.confidentiality), doc], [documentId(doc.sha256, "client"), doc]]));
 	const targets = [...new Set(ids)].map((id) => byId.get(id));
 	if (targets.some((doc) => !doc)) throw new Error("Some of those documents aren't in Cloudflare's list, so nothing was changed. Press Fetch latest, then try again.");
 	const chosen = targets;
+	if (archived) {
+		const going = chosen.filter((doc) => !doc.archivedAt);
+		const folderOnly = unrecorded(root, going, client);
+		const agreed = new Set(confirmed.map((id) => byId.get(id)?.sha256));
+		const unconfirmed = going.filter((doc) => doc.confidentiality !== "client" && doc.clientFiledAt && !agreed.has(doc.sha256));
+		const refusal = folderOnly.length ? `${counted(folderOnly.length)} ${folderOnly.length === 1 ? "is" : "are"} the client's on this laptop only, so nothing was archived: archived, the handover's findings go at the next Analyse, and Restore would bring ${folderOnly.length === 1 ? "it" : "them"} back as public. Run \`pathways file-as-client\` in Terminal first, which files ${folderOnly.length === 1 ? "it" : "them"} as the client's in Cloudflare, then press Fetch latest and archive.` : unconfirmed.length ? `${counted(unconfirmed.length)} filed as the client's must be confirmed before ${unconfirmed.length === 1 ? "it's" : "they're"} archived, so nothing was archived. Choose Archive again and confirm.` : null;
+		if (refusal) {
+			recordFilings(root, live, outsideGit);
+			return {
+				changed: 0,
+				error: refusal
+			};
+		}
+	}
 	const queue = chosen.filter((doc) => Boolean(doc.archivedAt) !== archived);
 	const action = archived ? "archive" : "restore";
 	let refused = null;
@@ -4735,6 +4864,35 @@ async function pushRecord(record, body) {
 		if (!yours) await worker("/v0/checkout", token, { method: "DELETE" });
 	}
 }
+/** The signed-in person's calls to the admin Worker, for a command run in Terminal: a plain reason when there's no sign-in. */
+async function commandCall() {
+	const token = await accessToken();
+	if (token === "missing") throw new Error("cloudflared isn't set up: type /pathways again, which sets it up.");
+	if (!token) throw new Error(`Sign in first: open the tool with /pathways and sign in, or run \`cloudflared access login ${ADMIN_URL}\` in Terminal, then run this again.`);
+	return callWith(token);
+}
+/** What `pathways file-as-client` would file (client-filed.ts filingPlan), from the working folder and Cloudflare's list. */
+async function planClientFiling(sha256s) {
+	const root = workingFolderPath();
+	assertOutsideGit(root);
+	const call = await commandCall();
+	return {
+		call,
+		...await filingPlan({
+			root,
+			call,
+			client: await workingStateClient(),
+			sha256s
+		})
+	};
+}
+/** Files them as the client's in Cloudflare, holding the checkout while it does. How many it filed. */
+function fileClientDocuments({ call, file }) {
+	return withCheckout(call, "filed", () => fileAsClient({
+		call,
+		documents: file
+	}));
+}
 var DOCUMENT_ID = /^(d|licensed)-[0-9a-f]{12}$/;
 var archiving = false;
 /** Archive at work, for Analyse, Publish, Roll back, Promote and uploads to wait for: it rewrites the document list. */
@@ -4744,22 +4902,44 @@ var MAX_ARCHIVE_BODY = 262144;
 async function archive(body) {
 	let ids;
 	let archived;
+	let confirmed;
 	try {
-		({ids, archived} = JSON.parse(body.toString("utf8")));
+		({ids, archived, confirmed = []} = JSON.parse(body.toString("utf8")));
 	} catch {
 		throw new Error("The page sent something that isn't JSON.");
 	}
-	if (!Array.isArray(ids) || ids.length === 0 || ids.length > 5e3 || !ids.every((id) => typeof id === "string" && DOCUMENT_ID.test(id)) || typeof archived !== "boolean") throw new Error("Choose which documents to archive or restore.");
+	const documentIds = (value, most) => Array.isArray(value) && value.length <= most && value.every((id) => typeof id === "string" && DOCUMENT_ID.test(id));
+	if (!documentIds(ids, 5e3) || ids.length === 0 || typeof archived !== "boolean") throw new Error("Choose which documents to archive or restore.");
+	if (!documentIds(confirmed, ids.length)) throw new Error("The page sent a confirmation the tool doesn't understand.");
 	const root = workingFolderPath();
 	assertOutsideGit(root);
 	const call = callWith(await signedInToken());
+	const client = await workingStateClient();
 	return withCheckout(call, archived ? "archived" : "restored", () => setArchived({
 		root,
 		call,
+		client,
 		ids,
 		archived,
+		confirmed,
 		outsideGit: assertOutsideGit
 	}));
+}
+/**
+* Brings the documents filed as the client's into this laptop's document list (client-filed.ts recordFilings), so a
+* filing made since the last Fetch latest holds for Analyse and Publish. With nobody signed in, the list stays as it
+* is (Analyse works offline) and the answer is false; Publish signs in first, so it always has them.
+*/
+async function refreshFilings(call) {
+	const root = workingFolderPath();
+	if (!existsSync(path.join(root, "documents", "index.json"))) return true;
+	if (!call) {
+		const token = await accessToken();
+		if (!token || token === "missing") return false;
+		call = callWith(token);
+	}
+	recordFilings(root, await documentList(call), assertOutsideGit);
+	return true;
 }
 var tookCheckout = false;
 /** Uploads one document to the raw bucket through the Worker, and keeps a copy in the working folder. */
@@ -5141,6 +5321,7 @@ async function analyse(landscapeDir, everything) {
 	const evidence = path.join(landscape, "evidence");
 	const index = path.join(root, "documents", "index.json");
 	if (!existsSync(index)) throw new Error("This working folder wasn't made by Fetch latest, so it can't be analysed here.");
+	const filingsChecked = await refreshFilings().catch(() => false);
 	const documents = indexDocuments(root);
 	let token = null;
 	const call = async (route, init = {}, timeoutMs) => worker(route, await (token ??= signedInToken()), init, timeoutMs);
@@ -5151,6 +5332,7 @@ async function analyse(landscapeDir, everything) {
 	const plan = planRun(root, client, documents, everything);
 	if (plan.unknownLevel.length) throw new Error(`${plural(plan.unknownLevel.length, "document has", "documents have")} a confidentiality level this tool doesn't know, so nothing was read. An update to the tool reads them.`);
 	if (plan.clientWithoutId.length) throw new Error(`${plural(plan.clientWithoutId.length, "document is", "documents are")} the client's own, and the tool doesn't know which client yet, so it can't file them. Sign in (the admin Worker names the client), then press Analyse again.`);
+	if (plan.unfiled.length) throw new Error(`${plural(plan.unfiled.length, "document is", "documents are")} the client's by this folder's findings alone: Cloudflare labels ${plan.unfiled.length === 1 ? "it" : "them"} public or licensed and hasn't filed ${plan.unfiled.length === 1 ? "it" : "them"} as the client's, so nothing was read. Run \`pathways file-as-client\` in Terminal, which files ${plan.unfiled.length === 1 ? "it" : "them"}, then press Analyse again.${filingsChecked ? "" : " If someone has filed them already, sign in so the tool can see it."}`);
 	const settings = JSON.parse(readFileSync(path.join(landscapeDir, "rules", "settings.json"), "utf8"));
 	const rulesAtStart = rulesHash(root);
 	const reading = readRules(root)?.reading ?? {
@@ -5184,6 +5366,7 @@ async function analyse(landscapeDir, everything) {
 		documentIds: plan.read.map((each) => each.id)
 	};
 	const notes = [];
+	if (!filingsChecked && plan.read.some((each) => each.route === "public")) notes.push("Cloudflare couldn't be asked which documents are filed as the client's, so any filed since the last Fetch latest were read by their label. Sign in and press Analyse again before publishing: Publish checks.");
 	const prepared = await prepareTexts({
 		root,
 		client,
@@ -5761,6 +5944,10 @@ async function versionsForPage() {
 }
 async function publish(note) {
 	const client = await workingStateClient();
+	const call = await signedInCall();
+	const building = buildRunning();
+	if (building) throw new Error(`${building} is building the map. Publish once it's done.`);
+	await refreshFilings(call);
 	const { json, covers } = builtFiles();
 	const files = [...Object.entries(json).map(([name, value]) => {
 		const bytes = Buffer.from(JSON.stringify(value));
@@ -5783,10 +5970,9 @@ async function publish(note) {
 	if (!readContextFactors(root)) throw new Error("The context factors aren't in this working folder, so the map would show slugs, not their names. Press Fetch latest, then publish.");
 	const analysed = analysedIds(root, client);
 	const ownIds = clientFindingsIds(root, client);
-	const documents = JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(idInTool(doc, ownIds))).map((doc) => doc.sha256);
-	const version = await sendVersion(await signedInCall(), {
+	const version = await sendVersion(call, {
 		files,
-		documents,
+		documents: JSON.parse(readFileSync(index, "utf8")).documents.filter((doc) => !doc.archivedAt && analysed.has(idInTool(doc, ownIds))).map((doc) => doc.sha256),
 		note,
 		workspace: {
 			root,
@@ -6483,6 +6669,41 @@ async function pushFactorsCommand() {
 		return 1;
 	}
 }
+/**
+* Files documents as the client's in Cloudflare (client-filed.ts): it lists them and asks first, so it runs only in
+* Terminal, where a person answers. That keeps it from running by accident, not a guard: the rule that a person runs
+* it, never Claude, is the skill's. A filing can't be undone.
+*/
+async function fileAsClientCommand() {
+	try {
+		if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Run this in Terminal: it lists what it would file and asks before filing. A person files documents as the client's, never Claude.");
+		const sha256s = process.argv.slice(3);
+		const plan = await planClientFiling(sha256s);
+		if (plan.file.length === 0) {
+			console.log(sha256s.length ? "Cloudflare files those as the client's already: nothing to do." : `Nothing to file: every document this working folder takes as the client's is filed in Cloudflare already${plan.filedAlready ? ` (${plan.filedAlready} filed in all)` : ""}.`);
+			return 0;
+		}
+		const one = plan.file.length === 1;
+		console.log(sha256s.length ? `${one ? "This document is" : `These ${plan.file.length} documents are`} labelled public or licensed in Cloudflare:` : `${one ? "This document is" : `These ${plan.file.length} documents are`} labelled public or licensed in Cloudflare, but this working folder files ${one ? "its" : "their"} findings with the client's:`);
+		for (const doc of plan.file) console.log(`  ${doc.filename}  (${doc.confidentiality}, ${doc.sha256.slice(0, 12)}…)`);
+		console.log(`Filed as the client's, ${one ? "it's" : "they're"} read and mapped as the client's on every laptop, never in the map built for anyone else. A filing can't be undone.`);
+		const prompt = createInterface({
+			input: process.stdin,
+			output: process.stdout
+		});
+		const answer = await prompt.question(`File ${one ? "it" : "them"} as the client's in Cloudflare? [y/N] `).finally(() => prompt.close());
+		if (!/^y(es)?$/i.test(answer.trim())) {
+			console.log("Nothing was filed.");
+			return 0;
+		}
+		const filed = await fileClientDocuments(plan);
+		console.log(`Filed ${filed === 1 ? "1 document" : `${filed} documents`} as the client's in Cloudflare. Every laptop, this one included, takes ${one ? "it" : "them"} as the client's from its next Fetch latest, Analyse or Publish.`);
+		return 0;
+	} catch (error) {
+		console.log(error.message);
+		return 1;
+	}
+}
 async function pushDevCommand() {
 	try {
 		const args = process.argv.slice(3).filter((arg) => arg !== "--first");
@@ -6621,6 +6842,7 @@ var command = {
 	"push-structure": pushStructureCommand,
 	"push-sources": pushSourcesCommand,
 	"push-factors": pushFactorsCommand,
+	"file-as-client": fileAsClientCommand,
 	"push-dev": pushDevCommand,
 	"pull-dev": pullDevCommand,
 	"dev-snapshots": devSnapshotsCommand,
@@ -6636,7 +6858,7 @@ var command = {
 	}
 }[process.argv[2] ?? ""];
 if (!command) {
-	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | push-dev [folder] [--first] | pull-dev [folder] [snapshot] [--all] | dev-snapshots | restore-dev <snapshot> | library-plan [folder] | upload-library [folder] | rekey-library [folder] [--apply]");
+	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | file-as-client [sha256…] | push-dev [folder] [--first] | pull-dev [folder] [snapshot] [--all] | dev-snapshots | restore-dev <snapshot> | library-plan [folder] | upload-library [folder] | rekey-library [folder] [--apply]");
 	process.exit(1);
 }
 process.exit(await command());
