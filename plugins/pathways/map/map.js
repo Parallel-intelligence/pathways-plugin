@@ -17,6 +17,8 @@
     // &go&co scale (Leonardo, Lab): keys #003830 · #0b6f83 · #4ebb7a · #bdf581 · #f2f48e at 0 · 23 · 57 · 84 · 100%; flat ground = the first stop
     goandco:["#003830","#055257","#0b6d80","#2c8581","#3f9e7e","#4cb87b","#7ad07d","#a6e780","#cef585","#f2f48e"],
     cividis:["#00224e","#123570","#3b496c","#575d6d","#707173","#8a8678","#a59c74","#c3b369","#e1cc55","#fee838"],
+    // brand red (Leonardo, CAM02): keys #14050f · #3e282d · #852829 · #d9d4d4; flat ground = the first stop
+    red:    ["#14050f","#512930","#96373a","#b16167","#c5898f","#d0afb4","#d9d4d4"],
     turbo:  ["#30123b","#4662d7","#36aaf9","#1ae4b6","#72fe5e","#c8ef34","#faba39","#f66b19","#cb2a04","#7a0403"],
     // light themes: a pale floor rising to a saturated summit
     // white-beige → orange → red → purple summits
@@ -38,7 +40,7 @@
     return [0,1,2].map(c=>Math.round(a[c]+(b[c]-a[c])*f));
   }
   // where flat ground sits on each ramp: scales whose low end brightens quickly get a lower floor
-  const FLOOR_TS={magma:0.10, inferno:0.10, plasma:0.06, viridis:0.10, goandco:0.0, cividis:0.08, turbo:0.03, ember:0.03, orchid:0.02, lemon:0.0, dusk:0.0, lagoon:0.0};
+  const FLOOR_TS={magma:0.10, inferno:0.10, plasma:0.06, viridis:0.10, goandco:0.0, red:0.0, cividis:0.08, turbo:0.03, ember:0.03, orchid:0.02, lemon:0.0, dusk:0.0, lagoon:0.0};
   let FLOOR_T=FLOOR_TS.magma;
   let rampName="magma", rampStops=RAMPS.magma, FLOOR_RGB=sampleRamp(rampStops,FLOOR_T);
   function rampCSS(){                            // legend runs floor → peak
@@ -74,11 +76,10 @@
     for(const b of document.querySelectorAll(".rchip")) b.setAttribute("aria-pressed", b.dataset.ramp===name?"true":"false");
     document.getElementById("rampVal").textContent=name;
     syncRampDefault();
-    document.getElementById("btnTheme")?.setAttribute("aria-pressed", light ? "true" : "false");
+    document.getElementById("btnTheme")?.setAttribute("aria-pressed", name==="red" ? "true" : "false");
   }
   document.getElementById("btnTheme").addEventListener("click",()=>{
-    const light=LIGHT_RAMPS.has(rampName);
-    applyRamp(light ? "goandco" : "lagoon");   // the light theme is lagoon
+    applyRamp(rampName==="red" ? "goandco" : "red");   // the toggle swaps the green scale and the red one
     try{ localStorage.setItem("ramp-default", rampName); }catch(e){}   // remembered in this browser
   });
   for(const b of document.querySelectorAll(".rchip")){
@@ -96,8 +97,13 @@
     btn.disabled=isDefault; btn.textContent=isDefault ? "Default ✓" : "Make default";
   }
   document.getElementById("rampDefault").addEventListener("click",()=>{ try{ localStorage.setItem("ramp-default", rampName); }catch(e){} syncRampDefault(); });
-  // no light / dark toggle (12 Nov): a light scale remembered in this browser is ignored, so nobody is left in light
-  applyRamp((r=>r && !LIGHT_RAMPS.has(r) ? r : null)(savedRamp()) || "goandco");
+  // the green / red toggle (bottom right) is for the team, and the client's named approvers on the dev link: inside
+  // the tool and on the dev link (its pages sit under /dev/, a path the portal never serves) it remembers its choice in
+  // this browser (a light scale saved before 12 Nov is ignored); on the portal it isn't there and the map is always
+  // green (19 Nov 2026). Inside the tool is the same test as IN_TOOL, below, which isn't defined yet here.
+  const scaleShown = window.parent !== window || location.pathname.startsWith("/dev/");
+  if(!scaleShown) document.getElementById("btnTheme").remove();
+  applyRamp((r=>scaleShown && r && !LIGHT_RAMPS.has(r) ? r : null)(savedRamp()) || "goandco");
 
   // ---------- theme data: Structure (GWI industries) + Signal (richness hills) ----------
   const SPAN = 10;              // terrain spans [-5,5] in X and Z
@@ -201,12 +207,12 @@
         for(const c of cs) open.push({
           ...t, slug:c.slug, title:c.title, summary:c.summary, isSubTheme:true, subKey:c.key,
           parentSlug:t.slug, parentTitle:t.title,
-          frequency:Math.max(1,c.mentions||1), signalMentions:c.mentions||0, signalDocs:c.docs||0, noSignal:!c.mentions, noDemand:"demand" in c && (c.demand==null || c.demand==="missing"), layer:(c.minted||c.fromEvidence)?"emergent":t.layer,   /* a sub-theme minted from the research reads as new */ relevance:null, excerptTotal:null,
+          frequency:Math.max(1,c.mentions||1), widthFrequency:c.widthMentions, signalMentions:c.mentions||0, signalDocs:c.docs||0, noSignal:!c.mentions, noDemand:"demand" in c && (c.demand==null || c.demand==="missing"), layer:(c.minted||c.fromEvidence)?"emergent":t.layer,   /* a sub-theme minted from the research reads as new */ relevance:null, excerptTotal:null,
           sources:c.sources||[], marketSizeUsdB:null, cagr2019_24:null, phrases:null, mergedFrom:null,
         });
       }
-      const top=Math.max(1,...open.map(o=>o.frequency));
-      for(const o of open) o.frequencyNormalised=+(0.15+0.85*Math.sqrt(o.frequency/top)).toFixed(3);
+      const top=heightScale?.subthemes.max ?? Math.max(1,...open.map(o=>o.frequency));
+      for(const o of open) o.frequencyNormalised=+(0.15+0.85*Math.sqrt((o.widthFrequency ?? o.frequency)/top)).toFixed(3);
       return {...src, themes:open};
     }
     return {...src, themes:list};
@@ -285,9 +291,11 @@
   function applyHeights(w){
     const items=w.items;
     if(!items.length) return;
-    const maxE=Math.max(...items.map(t=>t.excerpts)), minE=Math.min(...items.map(t=>t.excerpts));
+    // heights scale to the tallest hill, or in Base map to the full map's, so what the client's documents add shows
+    const ref=heightScale?.[w.level];
+    const maxE=ref ? ref.max : Math.max(...items.map(t=>t.excerpts)), minE=ref ? ref.min : Math.min(...items.map(t=>t.excerpts));
     for(const t of items){
-      const lg=(Math.log(t.excerpts)-Math.log(minE))/Math.max(1e-6,Math.log(maxE)-Math.log(minE));
+      const lg=Math.max(0,(Math.log(t.excerpts)-Math.log(minE))/Math.max(1e-6,Math.log(maxE)-Math.log(minE)));
       t.height=0.12+0.88*lg;
       t.mentions=t.excerpts/maxE;
       const fn = t.frequencyNormalised || Math.sqrt(t.mentions);
@@ -484,14 +492,16 @@
   /** A source link only when it is http(s); a cover only from this server. Data never decides a scheme or origin. */
   const safeHref=u=>{ if(!u) return null; try{ const x=new URL(u, location.href); return /^https?:$/.test(x.protocol) ? x.href : null; }catch(e){ return null; } };
   const safeImg=u=>{ if(!u) return null; try{ const x=new URL(u, location.href); return x.origin===location.origin ? x.href : null; }catch(e){ return null; } };
+  let bootBundle=null;     // the bundle as loaded, for the Base map button
+  let heightScale=null;   // Base map: the full map's tallest and lowest hills, per level, so heights keep its scale
   /** The bundle's industries, sectors and markets, as the page keeps them (at start and on each refresh). */
   function readBundle(data){
-    const maxF=Math.max(1,...data.themes.map(t=>t.frequency||0));
+    const maxF=heightScale?.themes.max ?? Math.max(1,...data.themes.map(t=>t.frequency||0));
     const hills=data.themes.map(t=>({
       slug:t.slug, title:t.title, summary:t.summary, layer:t.layer, type:t.layer, emergent:!!t.emergent,
       industrySlug:t.industrySlug, industryTitle:t.industryTitle,
       marketSizeUsdB:t.marketSizeUsdB, cagr2019_24:t.cagr,
-      frequency:Math.max(1,t.frequency||0), frequencyNormalised:+(0.15+0.85*Math.sqrt((t.frequency||0)/maxF)).toFixed(3),
+      frequency:Math.max(1,t.frequency||0), frequencyNormalised:+(0.15+0.85*Math.sqrt((t.widthFrequency ?? t.frequency ?? 0)/maxF)).toFixed(3),
       signalMentions:t.signalMentions, signalDocs:t.signalDocs, excerptTotal:t.excerpts ?? 0, relevance:t.relevance ?? null, noSignal:!!t.noSignal, sources:t.sources||[],
       x:t.x, y:t.y,
       industryMarketSizeUsdB:(data.structure.industries.find(i=>i.slug===t.industrySlug)||{}).marketSizeUsdB ?? null,
@@ -511,6 +521,7 @@
       const r=await fetch(url,{cache:"no-store"}); if(!r.ok){ const e=new Error(r.status+" "+url); e.status=r.status; throw e; }
       const data=await r.json();
       [SIM] = await Promise.all([loadSimilarity(data), loadGrowth()]);   // relatedness and places (null keeps the old layout); growth
+      bootBundle=data;
       readBundle(data);
       // Presence (the brand step) shows faded and can't be opened until a version carries brands; Uniqueness stays
       // greyed out in the page until it's scored (12 Nov), whatever the data
@@ -636,7 +647,7 @@
 
   // ---------- minimap: the 2-D height image, blended per column exactly like the shader ----------
   const hmBase=new Float32Array(HM*HM), hmShrunk=new Float32Array(HM*HM);
-  const gNum=new Float32Array(HM*HM*4), gDen=new Float32Array(HM*HM), gData=new Float32Array(HM*HM*4);
+  const gAct=new Float32Array(HM*HM), gData=new Float32Array(HM*HM*4);
   const growthTex=gl.createTexture();
   let introFlat=false;             // the first-load intro holds the terrain flat until it grows it
   // the terrain draws the terrain pane's world (in single views both panes share it)
@@ -662,8 +673,14 @@
   }
   function paintHeightmap(tex, scaleOf, peakKey, store){
     hmData.fill(0);
-    const doGrowth = tex===hmTexBase; if(doGrowth){ gNum.fill(0); gDen.fill(0); }
-    const pxPerUnit=HM/SPAN, P=4;                        // p-norm: a soft max so hills merge
+    // Growth colour (gData): the Activity height painted on the same hills (each hill's height times its Activity over
+    // Growth ratio, merged with the same soft max), as an absolute height. Channel 1 is the full-size
+    // hills, channel 0 the Presence-shrunk ones; the shader blends them by the shrink field exactly as it blends the
+    // heights, so a hill sinking mid-roll fades its colour with it (no cut-off edges, no stale end-state colour).
+    const shr = tex===hmTexShrunk, doGrowth = tex===hmTexBase || shr, ch = shr ? 0 : 1;
+    if(doGrowth) gAct.fill(0);
+    const pxPerUnit=HM/SPAN;                             // p-norm (p=4): a soft max so hills merge
+    // p=4 and the 1.5 exponent are written as products and square roots: Math.pow made each repaint ~3x slower
     for(const t of terrainItems()){
       const k=scaleOf(t), gE=t.evRatio??1;                               // per-theme multiplier (1 = untouched)
       const cx=((t.x+HALF)/SPAN)*HM, cy=((t.z+HALF)/SPAN)*HM;
@@ -676,15 +693,15 @@
       for(let y=y0;y<=y1;y++){
         const dy=y-cy, row=y*HM;
         for(let x=x0;x<=x1;x++){
-          const dx=x-cx, g=hgt*Math.exp(-Math.pow((dx*dx+dy*dy)*inv, 1.5));
-          const gp=Math.pow(g,P); hmData[row+x]+=gp;
-          if(doGrowth){ gNum[(row+x)*4+1]+=gp*gE; gDen[row+x]+=gp; }
+          const dx=x-cx, q=(dx*dx+dy*dy)*inv, g=hgt*Math.exp(-q*Math.sqrt(q)), g2=g*g;
+          hmData[row+x]+=g2*g2;
+          if(doGrowth){ const a=g2*gE*gE; gAct[row+x]+=a*a; }
         }
       }
     }
-    for(let i=0;i<hmData.length;i++) hmData[i]=Math.pow(hmData[i],1/P);
+    for(let i=0;i<hmData.length;i++) hmData[i]=Math.sqrt(Math.sqrt(hmData[i]));
     if(doGrowth){
-      for(let i=0;i<gDen.length;i++){ const d=gDen[i], j=i*4; gData[j+1] = d>1e-12 ? gNum[j+1]/d : 1; gData[j+3]=1; }
+      for(let i=0;i<gAct.length;i++){ const j=i*4; gData[j+ch] = Math.sqrt(Math.sqrt(gAct[i])); gData[j+3]=1; }   // absolute Activity height
       gl.bindTexture(gl.TEXTURE_2D,growthTex);
       gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,HM,HM,0,gl.RGBA,gl.FLOAT,gData);
       for(const [k,v] of [[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D,k,v);
@@ -724,6 +741,21 @@
       visible[i]=hmBase[i]+(hmShrunk[i]-hmBase[i])*f;
     }
     return visible;
+  }
+  // the Growth colour mix on screen (full-size and Presence-size channels blended by the field), so a roll between
+  // views starts its colours from what is shown, as it does its heights
+  function captureVisibleGrowthMix(){
+    const visible=new Float32Array(HM*HM);
+    for(let y=0;y<HM;y++) for(let x=0;x<HM;x++){
+      const i=y*HM+x, j=i*4;
+      const f=field[Math.min(FIELD_N-1,Math.round(x/(HM-1)*(FIELD_N-1)))];
+      visible[i]=gData[j+1]+(gData[j]-gData[j+1])*f;
+    }
+    return visible;
+  }
+  function useVisibleGrowthMixAsBase(visible){
+    for(let i=0;i<visible.length;i++) gData[i*4+1]=visible[i];
+    gl.bindTexture(gl.TEXTURE_2D,growthTex); gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,HM,HM,gl.RGBA,gl.FLOAT,gData);
   }
   function useVisibleHeightmapAsBase(visible){
     hmBase.set(visible);
@@ -941,7 +973,9 @@
     float t = mix(uFloorT, 1.0, clamp(vH, 0.0, 1.0) * (1.0-uFlat));
     vec3 col = ramp(t);
     if(uGrowthOn > 0.001){
-      vec4 f = texture(uGrowth, vUv);
+      vec4 f = texture(uGrowth, vUv); float hc = curAt(vUv);
+      // the Activity height under this point, blended like the heights; vH/hc carries the edge mask, so colour = Activity height
+      f.g = hc > 1e-5 ? mix(f.g, f.r, texture(uField, vec2(vUv.x,0.5)).r) / hc : 0.0;
       // Growth keeps each hill's Activity colours (f.g = Activity height over Growth height), so colour still reads as
       // evidence while the shape shows growth. The 12 Nov inverted trial confused readers and was reverted.
       col = mix(col, ramp(mix(uFloorT, 1.0, clamp(vH*f.g, 0.0, 1.0) * (1.0-uFlat))), uGrowthOn);
@@ -2688,22 +2722,22 @@
    * pane whose peaks did not change does not move. `labelPanes` rebuild their labels as the roll passes.
    * `stagger` 0 morphs every column together instead of rolling left to right.
    */
-  function rollTerrain(change, labelPanes=[], {stagger=ROLL.STAGGER}={}){
+  function rollTerrain(change, labelPanes=[], {stagger=ROLL.STAGGER, ghost=true}={}){
     endIntro();
     if(roll) endRoll();                                   // a new change mid-roll starts from where the last one landed
     for(const w of builtWorlds()) for(const t of w.items) t.transitionFromScale=bubblePresenceScale(t);
-    const visible=captureVisibleHeightmap();
+    const visible=captureVisibleHeightmap(), visibleMix=captureVisibleGrowthMix();
     change();
     const finalField = brandPack ? 1 : 0;
     repaintTerrain();
-    useVisibleHeightmapAsBase(visible);
+    useVisibleHeightmapAsBase(visible); useVisibleGrowthMixAsBase(visibleMix);
     field.fill(0); fieldBytes.fill(0); uploadField();
     directTransitionFinalField=finalField;
     shrinkTarget=1;
     shrinkEl.value=String(finalField*100);
     $("shrinkVal").textContent=(finalField*100)+"%";
     front=Infinity;                                       // the eased roll (stepRoll) carries it, not the slider's front
-    roll={t0:performance.now(), panes:labelPanes, stagger};
+    roll={t0:performance.now(), panes:labelPanes, stagger, ghost};
     for(const p of labelPanes){ p.labelsEl.classList.add("build"); buildLabels(p, true); }
     if(labelPanes.includes(rangePane())) rangeLabelsEl.classList.add("build");
     updatePeaks();
@@ -3099,8 +3133,9 @@
         gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D,rampTex);     gl.uniform1i(U.ramp,3);
         gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D,hmTexIndustry); gl.uniform1i(U.industry,4);
         gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D,growthTex); gl.uniform1i(U.growth,5);
-        gl.uniform1f(U.growthOn, step==='landscape' ? easeHill(colourP) : 0);
-        const envelope=!flat && (shrinkTarget>0 || front!==Infinity || introNow.intro>0);   // the ghost pass below runs
+        gl.uniform1f(U.growthOn, easeHill(colourP));   // Growth keeps Activity's colours in every view, Presence included
+        // the ghost pass below runs; a data morph (Base map) leaves it off, or the end state's contours show at once
+        const envelope=!flat && (shrinkTarget>0 || front!==Infinity || introNow.intro>0) && roll?.ghost!==false;
         gl.uniform1f(U.envelope, envelope && !introNow.intro ? 1 : 0);   // mid-intro the growing terrain keeps its own contours
         gl.uniform1f(U.ghost,0);
         gl.bindVertexArray(vao);
@@ -3166,19 +3201,81 @@
     if(n!==refreshSeq || !bundle || !loaded()) return;           // only the latest answer counts
     const sim = await loadSimilarity(bundle); await Promise.all([loadGrowth(), loadPresence()]);   // the optional layers too
     if(n!==refreshSeq) return;
-    if(viewFx) finishViewFx();
     SIM = sim;
+    fullData={bundle, docs:cleanSummaries(docs)};
+    syncBaseButton();
+    showData();
+  }
+
+  // ---------- base map: the landscape without the client's own documents ----------
+  // docs.json marks each client document (`client`) and gives every document's share of each peak (`adds`), so the
+  // base map is each peak less its client documents' shares; a market only they back leaves the map. Nothing new is
+  // fetched: the button morphs between the two from the data the page already has.
+  let fullData=null, baseOnly=false;
+  const btnBase=document.getElementById("btnBase");
+  const clientDocs=docs=>new Set(Object.entries(docs?.docs||{}).filter(([,d])=>d.client).map(([id])=>id));
+  function syncBaseButton(){
+    const any=clientDocs(fullData?.docs).size>0;
+    btnBase.hidden=!any;
+    if(!any) baseOnly=false;
+    btnBase.setAttribute("aria-pressed", baseOnly ? "true" : "false");
+  }
+  function baseData({bundle, docs}){
+    const mine=clientDocs(docs), titles=new Set([...mine].map(id=>docs.docs[id].title));
+    const lessClient=(slug, v)=>Math.max(0, +((v||0)-(docs.peaks[slug]||[]).filter(r=>mine.has(r.doc)).reduce((a,r)=>a+r.adds,0)).toFixed(3));
+    const heights=Object.fromEntries(Object.entries(docs.heights||{}).map(([slug,h])=>[slug, lessClient(slug,h)]));
+    // each kept document's share is of the base height now, so a peak's shares still add up to 100%
+    const peaks=Object.fromEntries(Object.entries(docs.peaks).map(([slug,rows])=>[slug, rows.filter(r=>!mine.has(r.doc))
+      .map(r=>({...r, share:heights[slug] ? +(r.adds/heights[slug]).toFixed(3) : 0}))]));
+    const backedByBase=slug=>(peaks[slug]||[]).some(r=>r.adds>0);
+    const backedByClient=slug=>(docs.peaks[slug]||[]).some(r=>mine.has(r.doc) && r.adds>0);
+    const without=list=>(list||[]).filter(t=>!titles.has(t));
+    // an industry only the client's documents back goes flat, like any industry without evidence
+    const themes=bundle.themes.map(t=>{ const f=lessClient(t.slug, t.frequency);
+      return {...t, frequency:f, widthFrequency:t.frequency, signalMentions:f, noSignal:t.noSignal || !backedByBase(t.slug), sources:without(t.sources),
+        signalDocs:(peaks[t.slug]||[]).filter(r=>r.adds>0).length}; });
+    const subthemes=Object.fromEntries(Object.entries(bundle.subthemes||{}).map(([ind,rows])=>[ind,
+      rows.filter(m=>backedByBase(m.slug) || !backedByClient(m.slug))
+          .map(m=>({...m, mentions:lessClient(m.slug, m.mentions), widthMentions:Math.max(1,m.mentions||1), sources:without(m.sources), docs:(peaks[m.slug]||[]).filter(r=>r.adds>0).length}))]));
+    const keep=Object.fromEntries(Object.entries(docs.docs).filter(([id])=>!mine.has(id)));
+    return {bundle:{...bundle, themes, subthemes}, docs:{...docs, docs:keep, peaks, heights}};
+  }
+  /** The full map's height range per level, as the page scales it without Base map. */
+  function fullScale({bundle}){
+    const range=v=>({max:Math.max(1,...v), min:Math.min(...v)});
+    return {themes:range(bundle.themes.map(t=>Math.max(1,t.frequency||0))),
+      subthemes:range(Object.values(bundle.subthemes||{}).flat().map(m=>Math.max(1,m.mentions||1)).concat(
+        bundle.themes.filter(t=>!(bundle.subthemes||{})[t.slug]?.length).map(t=>Math.max(1,t.frequency||0))))};
+  }
+  function showData(){
+    heightScale = baseOnly ? fullScale(fullData) : null;
+    morphTo(baseOnly ? baseData(fullData) : fullData, {fade:true});
+  }
+  btnBase.addEventListener("click",()=>{
+    if(!fullData) return;
+    baseOnly=!baseOnly; syncBaseButton();
+    showData();
+  });
+  Promise.all([booted, docsReady]).then(([,docs])=>{
+    if(bootBundle && docs && !fullData){ fullData={bundle:bootBundle, docs}; syncBaseButton(); }
+  }).catch(()=>{});
+
+  /** Morph the terrain from what is on screen to a bundle and its documents; camera, view, levels and selection stay. */
+  function morphTo({bundle, docs}, {fade=false}={}){
+    if(!loaded()) return;
+    if(viewFx) finishViewFx();
     readBundle(bundle);
-    docsData=cleanSummaries(docs); evidenceCache.clear();
+    docsData=docs; evidenceCache.clear();
     const levels={A:paneA.world.level, B:paneB.world.level}, was=sel && {slug:sel.slug, level:sel.level};
     setHover(null);
     const change=()=>{
       worlds.themes=worlds.subthemes=null;
       paneA.world=world(levels.A); paneB.world=world(levels.B);
-      buildLabels(paneA);                                     // at once: each label rides its peak through the morph
+      if(!fade) buildLabels(paneA);                           // at once: each label rides its peak through the morph
     };
-    if(paneA.visible && !reduceMotion) rollTerrain(change, [], {stagger:0});
-    else { if(roll) endRoll(); change(); repaintTerrain(); }
+    // Base map fades the labels in as the hills settle, as switching views does, instead of swapping them at once
+    if(paneA.visible && !reduceMotion) rollTerrain(change, fade ? [paneA] : [], {stagger:0, ghost:!fade});
+    else { if(roll) endRoll(); change(); if(fade) buildLabels(paneA); repaintTerrain(); }
     showWorld(paneB, paneB.world);
     buildRangeLabels();
     renderIndustryLegend();

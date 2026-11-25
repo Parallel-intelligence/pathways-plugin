@@ -74,7 +74,7 @@ def presence():
         x = json.loads(Path(f).read_text()); doc = x["doc"]["id"]
         if doc not in phase and doc not in ctype: unknown.add(doc)
         for g in x.get("brand", []):
-            if g.get("kind") == "presence" and g.get("slug"):
+            if g.get("kind") == "presence" and g.get("slug") and not g.get("detail"):
                 states[g["slug"]][g["state"]] += 1; docs[g["slug"]].add(doc)
         for g in x.get("findings", []):
             if g.get("slug"):
@@ -265,12 +265,22 @@ def similarity():
             raise SystemExit(f"ratings-industries.txt has {len(why)} pairs, the hierarchy needs {n*(n-1)//2}: re-rate")
         return S, why
 
+    def client_copy(name):
+        """The client's own ratings file next to the base one (ratings-markets.<client>.txt), when a client map has
+        one: its markets differ from the base map's where the client added its own (rated with the same rules)."""
+        p = RATINGS / name.replace(".", f".{CLIENT}.", 1) if CLIENT else None
+        return p if p and p.is_file() else None
+
     def read_market_ratings(groups):
+        lines = {}   # industry -> its ratings; a line in the client's copy replaces the base line for that industry
+        for p in [RATINGS / "ratings-markets.txt", client_copy("ratings-markets.txt")]:
+            for line in (p.read_text().splitlines() if p else []):
+                if line.startswith("#") or not line.strip():
+                    continue
+                ind, rest = line.split(":", 1)
+                lines[ind.strip()] = rest
         out = {}
-        for line in (RATINGS / "ratings-markets.txt").read_text().splitlines():
-            if line.startswith("#") or not line.strip():
-                continue
-            ind, rest = line.split(":", 1)
+        for ind, rest in lines.items():
             n = len(groups[ind])
             S, why = np.eye(n), {}
             for e in rest.split(";"):
@@ -290,9 +300,9 @@ def similarity():
         """Cross-industry market pairs for arcs only: rated pairs at LINK_MIN or above, at most LINKS_PER_MARKET per
         market (strongest first). Stops if the ratings were made for another hierarchy."""
         ind_of = {m["slug"]: ind for ind, m in mks}
-        cands = json.loads((RATINGS / "link-candidates.json").read_text())
+        cands = json.loads((client_copy("link-candidates.json") or RATINGS / "link-candidates.json").read_text())
         rated, pairs = set(), []
-        for line in (RATINGS / "ratings-market-links.txt").read_text().splitlines():
+        for line in (client_copy("ratings-market-links.txt") or RATINGS / "ratings-market-links.txt").read_text().splitlines():
             if line.startswith("#") or not line.strip():
                 continue
             if line.startswith("hierarchy "):

@@ -63,6 +63,8 @@ export function curate(structure, entries, options = {}) {
   const industryTo = new Map();
   const applied = [];
   const hiddenFindings = new Set();
+  // Markets added for another client's map (or for a client's, on the base map), and every decision about them.
+  const elsewhere = new Set();
 
   const fail = (d, why) => {
     throw new Error(`${d.id} (${d.op} in set ${d.set}): ${why}`);
@@ -78,6 +80,11 @@ export function curate(structure, entries, options = {}) {
 
   for (const d of active) {
     const c = d.change;
+    if (d.op === "add-market" && c.client && c.client !== (options.client ?? null)) {
+      elsewhere.add(c.slug);
+      continue;
+    }
+    if ([c.slug, c.from, c.into].some((x) => elsewhere.has(x))) continue;
     switch (d.op) {
       case "rename": {
         const item = get(d, c.level, c.slug);

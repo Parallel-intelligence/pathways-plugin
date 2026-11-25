@@ -22,7 +22,7 @@ A **mention** is one passage in a document that makes a specific claim about an 
   - about 0.6 for a clear paragraph,
   - about 0.3 for a passing mention.
 - **Weak mentions add no height.** Below `mention.minSalience` (0.4), a mention is a name-drop. It still shows in the side panel as evidence, but adds nothing to height.
-- **Per document, at most 5 mentions per market and 5 per industry** (`mention.maxPerMarketPerDocument`): the strongest and most distinct. That keeps one long survey from filling the panel with near-identical lines.
+- **Per document, at most 5 mentions per market and 5 per industry** (`mention.maxPerMarketPerDocument`): the strongest and most distinct. That keeps one long survey from filling the panel with near-identical lines. Mentions past the limit are kept as **detail** (`"detail": true`): they show as evidence, after the others, but add no height and don't count towards a new market.
 - **Read every part.** Long documents are cut into parts of about 12,000 words (`parts.wordsPerPart`), and each part is read in full. No skimming or keyword search instead of reading.
 
 ## 2b. Enablers and context (no height)

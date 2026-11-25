@@ -119,7 +119,8 @@ unplaced = proposals
 
 
 def counts(f):
-    return f["salience"] >= MIN_SALIENCE and (f.get("verified", True) or not MUST_VERIFY) and GRADE_WEIGHT[docs[f["doc"]]["grade"]]
+    # A "detail" finding (over the per-document limit) is shown with the evidence but adds no height.
+    return not f.get("detail") and f["salience"] >= MIN_SALIENCE and (f.get("verified", True) or not MUST_VERIFY) and GRADE_WEIGHT[docs[f["doc"]]["grade"]]
 
 
 rule = SETTINGS["newMarket"]
@@ -230,7 +231,8 @@ for slug, ind in industries.items():
             "docs": len(mkt_docs[m["slug"]]),
             "weight": 0.0,
             "sources": titles(mkt_docs[m["slug"]]),
-            "minted": m["slug"] in minted_slugs,
+            # New on the map: minted from evidence, or added to the structure by a person (curate add-market).
+            "minted": m["slug"] in minted_slugs or m.get("origin") == "added",
             "archetype": m.get("archetype"),  # a market a person added may have none
             "mergedFrom": m.get("mergedFrom"),
         })
@@ -315,7 +317,7 @@ for slug in industries:
     ]
     for key, title, fs in groups:
         if fs:
-            fs = sorted(fs, key=lambda f: -f["salience"])
+            fs = sorted(fs, key=lambda f: (bool(f.get("detail")), -f["salience"]))  # detail last
             ok = [f for f in fs if f.get("verified") or not MUST_VERIFY]
             # licensed passages are shown like any other (10 Nov); internalOnly stays for the page, always 0
             topics.append({"key": key, "title": title, "documents": len({f["doc"] for f in ok}),
