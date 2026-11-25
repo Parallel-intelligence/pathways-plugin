@@ -13,6 +13,10 @@ export const SCHEMA = "curation-decision/0.1";
 export const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 export const SET = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,119}$/;
+// An industry gets a file of its own in a published version, named after its slug, and a version's file
+// names are at most 80 characters (apps/admin/src/checks.js). A market gets no file, so its slug, which
+// names its industry too, can run longer.
+const INDUSTRY_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const LEVELS = new Set(["industry", "market"]);
 const MAX_WHY = 1000;
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}$/;
@@ -37,10 +41,12 @@ const OPS = {
     definition: "definition?",
     // Without evidence it's a market a person added to the structure, with nothing behind it yet.
     evidence: "evidence?",
+    // Only on that client's own map: the base map and other clients' maps leave it out.
+    client: "slug?",
   },
   "add-sector": { slug: "slug", title: "title" },
   // From the local tool: an industry of its own, a proposed market kept, one excerpt taken off.
-  "add-industry": { slug: "slug", title: "title", sector: "slug", definition: "definition?" },
+  "add-industry": { slug: "industrySlug", title: "title", sector: "slug", definition: "definition?" },
   confirm: { slug: "slug" },
   "hide-excerpt": { finding: "finding" },
   withdraw: {},
@@ -53,6 +59,7 @@ export const SET_OPS = new Set(["accept", "reject"]);
 const FIELD = {
   level: (v) => LEVELS.has(v),
   slug: (v) => typeof v === "string" && SLUG.test(v),
+  industrySlug: (v) => typeof v === "string" && INDUSTRY_SLUG.test(v),
   title: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= MAX_TITLE,
   definition: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= MAX_DEFINITION,
   archetype: (v) => typeof v === "string" && /^[A-F]$/.test(v),

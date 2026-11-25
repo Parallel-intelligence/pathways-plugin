@@ -14,6 +14,7 @@ var SCHEMA$1 = "curation-decision/0.1";
 var ID$1 = /^[a-z0-9][a-z0-9-]{0,79}$/;
 var SET = /^[a-z0-9][a-z0-9-]{0,39}$/;
 var SLUG$2 = /^[a-z0-9][a-z0-9-]{0,119}$/;
+var INDUSTRY_SLUG = /^[a-z0-9][a-z0-9-]{0,79}$/;
 var LEVELS$1 = /* @__PURE__ */ new Set(["industry", "market"]);
 var MAX_WHY = 1e3;
 var EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}$/;
@@ -54,14 +55,15 @@ var OPS = {
 		industry: "slug",
 		archetype: "archetype?",
 		definition: "definition?",
-		evidence: "evidence?"
+		evidence: "evidence?",
+		client: "slug?"
 	},
 	"add-sector": {
 		slug: "slug",
 		title: "title"
 	},
 	"add-industry": {
-		slug: "slug",
+		slug: "industrySlug",
 		title: "title",
 		sector: "slug",
 		definition: "definition?"
@@ -89,6 +91,7 @@ var SET_OPS = /* @__PURE__ */ new Set(["accept", "reject"]);
 var FIELD = {
 	level: (v) => LEVELS$1.has(v),
 	slug: (v) => typeof v === "string" && SLUG$2.test(v),
+	industrySlug: (v) => typeof v === "string" && INDUSTRY_SLUG.test(v),
 	title: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= MAX_TITLE,
 	definition: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= MAX_DEFINITION,
 	archetype: (v) => typeof v === "string" && /^[A-F]$/.test(v),
@@ -231,6 +234,7 @@ function curate(structure, entries, options = {}) {
 	const industryTo = /* @__PURE__ */ new Map();
 	const applied = [];
 	const hiddenFindings = /* @__PURE__ */ new Set();
+	const elsewhere = /* @__PURE__ */ new Set();
 	const fail = (d, why) => {
 		throw new Error(`${d.id} (${d.op} in set ${d.set}): ${why}`);
 	};
@@ -244,6 +248,15 @@ function curate(structure, entries, options = {}) {
 	};
 	for (const d of active) {
 		const c = d.change;
+		if (d.op === "add-market" && c.client && c.client !== (options.client ?? null)) {
+			elsewhere.add(c.slug);
+			continue;
+		}
+		if ([
+			c.slug,
+			c.from,
+			c.into
+		].some((x) => elsewhere.has(x))) continue;
 		switch (d.op) {
 			case "rename": {
 				const item = get(d, c.level, c.slug);
@@ -734,7 +747,7 @@ function findInternalField(value, path = "") {
 	return null;
 }
 var SLUG_KEY = /^[a-z0-9][a-z0-9-]{0,119}$/;
-var PAIR_KEY = /^[a-z0-9][a-z0-9-]{0,240}$/;
+var PAIR_KEY = /^(0|[1-9][0-9]{0,3})-(0|[1-9][0-9]{0,3})$/;
 var TEXT = { kind: "string" };
 var SLUG$1 = {
 	kind: "string",
@@ -761,7 +774,7 @@ var bySlug = (shape, key = SLUG_KEY) => ({
 	kind: "map",
 	key,
 	shape,
-	words: key === SLUG_KEY || key === PAIR_KEY
+	words: key === SLUG_KEY
 });
 var MATRIX = list$1(list$1(NUMBER));
 var SIMILARITY_LAYER = record$1({
@@ -897,9 +910,18 @@ function layerProblem(path, value) {
 	if (!shape) return `${path} isn't a map layer`;
 	const name = path.replace(/\.json$/, "");
 	const found = shapeProblem(value, shape, name);
-	if (found || path !== "presence.json") return found;
-	const groups = new Set(value.groups.map((group) => group.key));
-	for (const [hill, { types }] of Object.entries(value.hills)) if (Object.keys(types).some((key) => !groups.has(key))) return `${name}.hills.${hill}.types names a group the layer doesn't declare`;
+	if (found) return found;
+	if (path === "presence.json") {
+		const groups = new Set(value.groups.map((group) => group.key));
+		for (const [hill, { types }] of Object.entries(value.hills)) if (Object.keys(types).some((key) => !groups.has(key))) return `${name}.hills.${hill}.types names a group the layer doesn't declare`;
+	}
+	if (path === "similarity.json") {
+		const layers = [["industries", value.industries], ...Object.entries(value.markets).map(([industry, markets]) => [`markets.${industry}`, markets])];
+		for (const [at, { slugs, why }] of layers) for (const key of Object.keys(why)) {
+			const [a, b] = key.split("-").map(Number);
+			if (a === b || a >= slugs.length || b >= slugs.length) return `${name}.${at}.why.${key} names a pair the layer doesn't declare`;
+		}
+	}
 	return null;
 }
 /**
@@ -2611,7 +2633,7 @@ function misfiled(root, documents, publicFiles = findingsByDoc(folders(root, "pu
 	};
 }
 /** Why Validate or Publish waits while the client's findings sit with the public ones: Analyse clears them first. */
-var misfiledFirst = (then) => `Some of the client's findings are filed with the public ones. Press Analyse first, which clears them and rebuilds the map, then ${then}.`;
+var misfiledFirst = (then) => `Some of the client's findings are filed with the public ones. Press Analyse first, which clears them and rebuilds the map, then ${then === "rebuild" ? "stop the tool and run pathways rebuild again" : then}.`;
 /**
 * What a run reads, and what it tidies, from documents/index.json's list and the working folder. A document is new
 * when its pipeline has no findings for it: the public findings for public and licensed ones, the client's
@@ -3334,7 +3356,10 @@ function writeAll(root, records) {
 	}
 	const added = [...loaded.entries, ...records.map(entry)];
 	try {
-		curate(loaded.structure, added, { preview: openSets(added) });
+		curate(loaded.structure, added, {
+			preview: openSets(added),
+			client: clientId()
+		});
 	} catch (error) {
 		throw new Refusal(`That change doesn't apply: ${error.message}.`);
 	}
@@ -3436,6 +3461,17 @@ function rebuild(landscapeDir, root, client) {
 	return step("map").then(() => step("layers")).then(() => markBuilt(root, inputs));
 }
 var BuildFailed = class extends Error {};
+/**
+* The map and its layers again from the edits already accepted, as Validate's rebuild makes them, without accepting
+* anything: open edits stay out, as they do from Publish. For `pathways rebuild` (18 Nov 2026), so a working folder
+* worked on outside the page (local-first, then push-dev) gets the mark export-map needs for the dev link.
+*/
+function rebuildAccepted(landscapeDir, root, client) {
+	return withBuild("Rebuild", async () => {
+		if (misfiled(root, indexDocuments(root)).findings.length) throw new Error(misfiledFirst("rebuild"));
+		await rebuild(landscapeDir, root, client);
+	});
+}
 /**
 * `who` names the person on edits; `reviewer` on Validate, which accepts them for the map: the standalone tool asks
 * for the signed-in person there. On the dev server both come from PATHWAYS_WHO or git, and these routes have no
@@ -3823,7 +3859,10 @@ function readWorkspace(root, rules = RULES) {
 	const loaded = loadLandscape(root, clientId() ?? "");
 	const FROM_EVIDENCE = /* @__PURE__ */ new Set(["minted", "curation"]);
 	const drafts = sets(loaded.entries).filter((each) => each.state === "draft" || each.state === "partly accepted").map((each) => each.set);
-	const curated = curate(loaded.structure, loaded.entries, { preview: drafts });
+	const curated = curate(loaded.structure, loaded.entries, {
+		preview: drafts,
+		client: clientId()
+	});
 	const structure = curated.structure;
 	const hidden = new Set(curated.hiddenFindings);
 	const sectorOf = new Map(structure.sectors.map((each) => [each.slug, each]));
@@ -6992,13 +7031,7 @@ async function exportMapCommand() {
 	try {
 		const root = workingFolderPath();
 		assertOutsideGit(root);
-		if (!clientId()) {
-			const landscape = path.join(root, "landscape");
-			const maps = existsSync(landscape) ? readdirSync(landscape).filter((name) => /^map-[a-z0-9][a-z0-9-]*$/.test(name)) : [];
-			if (maps.length !== 1) throw new Error(maps.length ? "This working folder holds more than one client's map: set PATHWAYS_CLIENT to the one to export." : "This working folder has no client's map (landscape/map-<client>/): build it first, or set PATHWAYS_CLIENT.");
-			process.env.PATHWAYS_CLIENT = maps[0].slice(4);
-			clientId();
-		}
+		folderClient(root, "export");
 		const target = path.resolve(folder);
 		let existing = target;
 		while (!existsSync(existing)) existing = path.dirname(existing);
@@ -7013,6 +7046,39 @@ async function exportMapCommand() {
 		}));
 		assertOutsideGit(target);
 		console.log(`Wrote the client's map (${written} files, from ${where}/) to ${target}, as Publish would send it. Nothing went to Cloudflare.`);
+		return 0;
+	} catch (error) {
+		console.log(error.message);
+		return 1;
+	}
+}
+/** The client's map, as the build names it: PATHWAYS_CLIENT, else the one client's map this folder holds. */
+function folderClient(root, what) {
+	if (clientId()) return clientId();
+	const landscape = path.join(root, "landscape");
+	const maps = existsSync(landscape) ? readdirSync(landscape).filter((name) => /^map-[a-z0-9][a-z0-9-]*$/.test(name)) : [];
+	if (maps.length !== 1) throw new Error(maps.length ? `This working folder holds more than one client's map: set PATHWAYS_CLIENT to the one to ${what}.` : "This working folder has no client's map (landscape/map-<client>/): build it first, or set PATHWAYS_CLIENT.");
+	process.env.PATHWAYS_CLIENT = maps[0].slice(4);
+	return clientId();
+}
+/**
+* The client's map rebuilt from the edits already accepted, as Validate rebuilds it, but from Terminal and accepting
+* nothing (18 Nov 2026): for a working folder worked on outside the page (local-first, then push-dev), so export-map
+* takes it for the dev link. It reads the working folder (PATHWAYS_WORKSPACE, else the usual one). Nothing goes to
+* Cloudflare.
+*/
+async function rebuildCommand() {
+	try {
+		const root = workingFolderPath();
+		assertOutsideGit(root);
+		if (!existsSync(path.join(root, "landscape", "structure.json"))) throw new Error(`There's no landscape in ${root}: set PATHWAYS_WORKSPACE to the working folder.`);
+		const running = (await port()).state;
+		if (running === "ours" || running === "older") throw new Error("The tool is running: stop it first (pathways stop), then rebuild.");
+		const client = folderClient(root, "rebuild");
+		const where = path.relative(root, builtMapPath(root));
+		console.log(`Rebuilding ${where}/ from the accepted edits…`);
+		await rebuildAccepted(path.join(ROOT, "landscape"), root, client);
+		console.log(`Rebuilt ${where}/, built all the way through: export-map can take it now. Nothing went to Cloudflare.`);
 		return 0;
 	} catch (error) {
 		console.log(error.message);
@@ -7117,6 +7183,7 @@ var command = {
 	"pull-dev": pullDevCommand,
 	"dev-snapshots": devSnapshotsCommand,
 	"export-map": exportMapCommand,
+	rebuild: rebuildCommand,
 	"restore-dev": restoreDevCommand,
 	"library-plan": libraryPlanCommand,
 	"upload-library": uploadLibraryCommand,
@@ -7129,7 +7196,7 @@ var command = {
 	}
 }[process.argv[2] ?? ""];
 if (!command) {
-	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | file-as-client [sha256…] | push-dev [folder] [--first] | pull-dev [folder] [snapshot] [--all] | dev-snapshots | export-map <new or empty folder> | restore-dev <snapshot> | library-plan [folder] | upload-library [folder] | rekey-library [folder] [--apply]");
+	console.log("Usage: pathways start | stop | status | check | push-structure <structure.json> | push-sources <internal-sources.json> | push-factors <context-factors.json> | file-as-client [sha256…] | push-dev [folder] [--first] | pull-dev [folder] [snapshot] [--all] | dev-snapshots | rebuild | export-map <new or empty folder> | restore-dev <snapshot> | library-plan [folder] | upload-library [folder] | rekey-library [folder] [--apply]");
 	process.exit(1);
 }
 process.exit(await command());

@@ -9,17 +9,20 @@ it can also run alone after a map build.
 
 Writes landscape/map/docs.json:
   docs:  {id: {title, publisher, year, kind, grade, gradeReason, sample, geography,
-               summary, cover, internal, peaks}}
+               summary, cover, internal, client, peaks}}
   peaks: {industry or market slug: [{doc, adds, share, excerpts: [...]}]}, biggest first
   heights: {industry or market slug: height}, as build-map.py gave it
 
 Licensed or internal-use documents are shown like any other (10 Nov): excerpts, cover and link. `internal`
-only labels them as licensed.
+only labels them as licensed. `client` marks a document from the client's own folder (only in a
+client's map), so the map page can show the base map without them: each peak less their `adds`.
 Covers: landscape/map/covers/<id>.jpg, made beforehand from each document's first page. Summaries:
 landscape/map/doc-summaries/*.json.
 """
 import json
 import math
+import os
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 
@@ -43,6 +46,8 @@ summaries = {}
 for path in sorted((MAP / "doc-summaries").glob("*.json")):
     summaries.update(json.loads(path.read_text()))
 
+# The public documents' ids: in a client's map every other document is the client's own (build.py evidence()).
+public_ids = {json.loads(p.read_text())["doc"]["id"] for p in (ROOT / "landscape" / "evidence" / "findings").glob("*.json")}
 docs, findings, proposals = {}, [], {}
 for data in EVIDENCE():
     doc = data["doc"]
@@ -50,13 +55,24 @@ for data in EVIDENCE():
     findings += [{**f, "doc": doc["id"]} for f in data["findings"]]
     proposals.update({f["id"]: {**f, "doc": doc["id"]} for f in data["proposals"]})
 
-# Markets added from evidence that made it onto the map carry their proposal findings.
-minted = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
-if CLIENT and (ROOT / "client" / CLIENT / "minted-markets.json").exists():
-    minted += json.loads((ROOT / "client" / CLIENT / "minted-markets.json").read_text())["markets"]
+# Markets added from evidence that made it onto the map carry their proposal findings. Read them where
+# build-map.py did: from the curated structure when the curate tool runs the build (decisions apply), else
+# from the minted-markets files. Otherwise a market minted by decision adds height with no document behind it.
+tool = os.environ.get("PATHWAYS_CURATE")
+if tool:
+    preview = [x for x in os.environ.get("PATHWAYS_PREVIEW", "").split(",") if x]
+    result = subprocess.run(["node", tool, "effective", "--workspace", str(ROOT)] + [a for x in preview for a in ("--preview", x)],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise SystemExit(result.stderr.strip() or "curate effective failed")
+    minted = [m for m in json.loads(result.stdout)["structure"]["markets"] if m.get("origin") in ("curation", "minted")]
+else:
+    minted = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
+    if CLIENT and (ROOT / "client" / CLIENT / "minted-markets.json").exists():
+        minted += json.loads((ROOT / "client" / CLIENT / "minted-markets.json").read_text())["markets"]
 for m in minted:
     if m["slug"] in market_industry:
-        findings += [{**proposals[ref], "level": "market", "slug": m["slug"]} for ref in m["evidence"] if ref in proposals]
+        findings += [{**proposals[ref], "level": "market", "slug": m["slug"]} for ref in m.get("evidence", []) if ref in proposals]
 
 
 def internal(doc):
@@ -68,7 +84,7 @@ def verified(f):
 
 
 def counts(f):
-    return f["salience"] >= MIN_SALIENCE and verified(f) and GRADE_WEIGHT[docs[f["doc"]]["grade"]]
+    return not f.get("detail") and f["salience"] >= MIN_SALIENCE and verified(f) and GRADE_WEIGHT[docs[f["doc"]]["grade"]]
 
 
 sal = defaultdict(float)              # (peak, doc) -> salience that counts
@@ -99,7 +115,7 @@ def excerpt(f):
 peaks = defaultdict(list)
 for peak, doc_id in sorted(set(shown) | set(sal)):
     a = adds(peak, doc_id)
-    fs = sorted(shown.get((peak, doc_id), []), key=lambda f: -f["salience"])
+    fs = sorted(shown.get((peak, doc_id), []), key=lambda f: (bool(f.get("detail")), -f["salience"]))  # detail last
     if not fs and not a:
         continue
     peaks[peak].append({
@@ -127,7 +143,7 @@ for doc_id, d in docs.items():
         "grade": d["grade"], "gradeReason": d["gradeReason"], "sample": d["sample"],
         "geography": d["geography"], "summary": summaries.get(doc_id, ""),
         "cover": f"covers/{doc_id}.jpg" if cover.exists() else None,
-        "internal": internal(d), "peaks": peak_count[doc_id],
+        "internal": internal(d), "client": doc_id not in public_ids, "peaks": peak_count[doc_id],
         "url": d.get("url") or doc_meta.get(doc_id, {}).get("url"),
         "findings": sum(1 for f in findings if f["doc"] == doc_id and verified(f)),
     }

@@ -27,7 +27,7 @@ Amend (each writes one new decision record; needs --set and --why)
   curate move <market-slug> <industry-slug>
   curate hide <slug>          off the map; a market's evidence still counts for its industry
   curate delete <slug>        off the map, evidence dropped
-  curate add-market <industry-slug> <title> --definition <text> --archetype <A-F> --evidence <id,id>
+  curate add-market <industry-slug> <title> --definition <text> --archetype <A-F> [--evidence <id,id>] [--client <client>]
   curate withdraw <decision-id>
   Add --supersedes <decision-id> to any amendment to tweak an earlier decision.
 
@@ -54,6 +54,7 @@ const { values: opt, positionals } = parseArgs({
     definition: { type: "string" },
     archetype: { type: "string" },
     evidence: { type: "string" },
+    client: { type: "string" },
     slug: { type: "string" },
     help: { type: "boolean", short: "h" },
   },
@@ -98,7 +99,7 @@ function load() {
 
 function apply(structure, entries, preview = opt.preview ?? []) {
   try {
-    return curate(structure, entries, { preview });
+    return curate(structure, entries, { preview, client: process.env.PATHWAYS_CLIENT || null });
   } catch (e) {
     die(e.message);
   }
@@ -303,15 +304,19 @@ function amend() {
       need(1, `${command} <slug>`);
       return record(command, { level: level(args[0]), slug: args[0] });
     case "add-market": {
-      need(2, "add-market <industry-slug> <title> --definition <text> --archetype <A-F> --evidence <id,id>");
+      need(2, "add-market <industry-slug> <title> --definition <text> --archetype <A-F> [--evidence <id,id>] [--client <client>]");
       if (level(args[0]) !== "industry") die("add-market takes an industry first");
       const title = args.slice(1).join(" ");
       const tail = title.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       if (!tail && !opt.slug) die("the title needs letters or digits");
       const slug = opt.slug ?? `mk-${args[0].replace(/^[a-z]+-/, "")}--${tail}`;
+      // No --evidence: a market a person adds to the structure, so the record carries no evidence at all
+      // (an empty list is invalid). Its findings are placed on it later.
+      const evidence = (opt.evidence ?? "").split(",").map((x) => x.trim()).filter(Boolean);
       return record("add-market", {
         slug, title, industry: args[0], archetype: opt.archetype, definition: opt.definition,
-        evidence: (opt.evidence ?? "").split(",").map((x) => x.trim()).filter(Boolean),
+        ...(evidence.length ? { evidence } : {}),
+        ...(opt.client ? { client: opt.client } : {}),
       });
     }
     case "withdraw":

@@ -7,7 +7,8 @@ excerpt against client/<client>/parts/<doc>.pNN.txt, and writes client/<client>/
   proposals  market or presence evidence for a market that isn't in the structure yet
   shaping    enablers and context
   brand      presence, uniqueness, project and customer findings: the client layers, never height
-Market evidence keeps the per-document limits in settings.json; presence keeps at most 3 per peak.
+Market evidence keeps the per-document limits in settings.json; presence keeps at most 3 per peak. Findings past a
+limit are kept, marked "detail": shown as evidence, adding no height.
 PATHWAYS_MERGE_IDS (comma-separated docs-v2.json ids), when set, limits the merge to those documents, and each only
 once every part is read: Analyse sets it to the documents its run read in full, so earlier findings-v2 files (the
 handover's among them) are never written over from older part outputs. A part output whose doc.id isn't the
@@ -58,15 +59,15 @@ def part_output(path, ids):
 
 
 def limited(items, cap_for):
-    """Strongest verified first, up to the cap per peak. A product category on an industry counts
-    as its own peak, as a market would (it stands in for markets the structure doesn't have yet).
-    The key's name follows the extraction output already in working folders."""
+    """Strongest verified first, up to the cap per peak; the rest are kept as "detail": shown with the
+    evidence, adding no height. A product category on an industry counts as its own peak, as a market
+    would (it stands in for markets the structure doesn't have yet). The key's name follows the
+    extraction output already in working folders."""
     kept, used = [], defaultdict(int)
     for f in sorted(items, key=lambda f: (not f["verified"], -f["salience"])):
         key = (f["slug"], f.get("apparelCategory"))
-        if used[key] < cap_for(f):
-            used[key] += 1
-            kept.append(f)
+        used[key] += 1
+        kept.append(f if used[key] <= cap_for(f) else {**f, "detail": True})
     return kept
 
 
