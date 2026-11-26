@@ -65,7 +65,13 @@ if tool:
                             capture_output=True, text=True)
     if result.returncode:
         raise SystemExit(result.stderr.strip() or "curate effective failed")
-    minted = [m for m in json.loads(result.stdout)["structure"]["markets"] if m.get("origin") in ("curation", "minted")]
+    curated = json.loads(result.stdout)
+    minted = [m for m in curated["structure"]["markets"] if m.get("origin") in ("curation", "minted")]
+    # Excerpts a decision moved to another market show there, as build-map.py counts them. Like markets added
+    # by decision, moves apply only when the curate tool runs the build (PATHWAYS_CURATE).
+    moved = curated.get("movedFindings", {})
+    findings = [f if f.get("id") not in moved else {**f, "level": moved[f["id"]]["level"], "slug": moved[f["id"]]["slug"]}
+                for f in findings if f.get("id") not in moved or moved[f["id"]] is not None]
 else:
     minted = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
     if CLIENT and (ROOT / "client" / CLIENT / "minted-markets.json").exists():

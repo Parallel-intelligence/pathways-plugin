@@ -52,7 +52,8 @@ export function plan(entries, { preview = [] } = {}) {
 /**
  * The structure with the decisions applied, plus where every removed market and industry's
  * evidence now goes: `remap.markets[slug]` is {level, slug} or null (dropped), and
- * `remap.industries[slug]` is a slug or null.
+ * `remap.industries[slug]` is a slug or null. `movedFindings[id]` is where a moved excerpt now
+ * counts, {level, slug} or null (its market later deleted); it takes the place of the excerpt's own slug.
  */
 export function curate(structure, entries, options = {}) {
   const { active } = plan(entries, options);
@@ -63,6 +64,8 @@ export function curate(structure, entries, options = {}) {
   const industryTo = new Map();
   const applied = [];
   const hiddenFindings = new Set();
+  // Excerpts moved to another market: finding id -> market slug. A later move of the same excerpt wins.
+  const movedTo = new Map();
   // Markets added for another client's map (or for a client's, on the base map), and every decision about them.
   const elsewhere = new Set();
 
@@ -84,7 +87,7 @@ export function curate(structure, entries, options = {}) {
       elsewhere.add(c.slug);
       continue;
     }
-    if ([c.slug, c.from, c.into].some((x) => elsewhere.has(x))) continue;
+    if ([c.slug, c.from, c.into, c.to].some((x) => elsewhere.has(x))) continue;
     switch (d.op) {
       case "rename": {
         const item = get(d, c.level, c.slug);
@@ -173,6 +176,10 @@ export function curate(structure, entries, options = {}) {
       case "hide-excerpt":
         hiddenFindings.add(c.finding);
         break;
+      case "move-excerpt":
+        get(d, "market", c.to);
+        movedTo.set(c.finding, c.to);
+        break;
     }
     applied.push({ id: d.id, set: d.set, op: d.op, by: d.by, at: d.at });
   }
@@ -200,12 +207,16 @@ export function curate(structure, entries, options = {}) {
   };
 
   const remap = { markets: {}, industries: {} };
+  // Where each moved excerpt ends up once later merges, hides and deletes of its market apply. A hidden
+  // excerpt stays hidden: the build checks hiddenFindings first.
+  const movedFindings = {};
+  for (const [finding, to] of [...movedTo].sort(([a], [b]) => (a < b ? -1 : 1))) movedFindings[finding] = resolveMarket(to);
   for (const slug of marketTo.keys()) remap.markets[slug] = resolveMarket(slug);
   for (const slug of industryTo.keys()) remap.industries[slug] = resolveIndustry(slug);
 
   s.industries = [...industries.values()];
   s.markets = [...markets.values()];
-  return { structure: s, remap, hiddenFindings: [...hiddenFindings].sort(), applied };
+  return { structure: s, remap, hiddenFindings: [...hiddenFindings].sort(), movedFindings, applied };
 }
 
 /** Each set's state, for `curate status`. */

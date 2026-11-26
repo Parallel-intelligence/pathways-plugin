@@ -43,7 +43,7 @@ structure = json.loads((ROOT / "landscape" / "structure.json").read_text())
 # from evidence, and says where removed items' evidence goes.
 DECISIONS = ROOT / "landscape" / "decisions"
 PREVIEW = [x for x in os.environ.get("PATHWAYS_PREVIEW", "").split(",") if x]
-curation = {"applied": [], "remap": {"markets": {}, "industries": {}}, "hiddenFindings": []}
+curation = {"applied": [], "remap": {"markets": {}, "industries": {}}, "hiddenFindings": [], "movedFindings": {}}
 CURATED = False
 # The tool always sets PATHWAYS_CURATE, so its builds take the same path with or without decisions.
 tool = os.environ.get("PATHWAYS_CURATE")
@@ -59,6 +59,7 @@ if tool or (DECISIONS.is_dir() and any(DECISIONS.glob("*.json"))):
     CURATED = True
 REMAP_MARKET, REMAP_INDUSTRY = curation["remap"]["markets"], curation["remap"]["industries"]
 HIDDEN = set(curation.get("hiddenFindings", []))
+MOVED = curation.get("movedFindings", {})  # finding id -> {level, slug} or None: excerpts a decision placed elsewhere
 FROM_EVIDENCE = ("curation", "minted")  # origins of markets that must meet the evidence rule
 moved_findings = dropped_findings = 0
 
@@ -69,6 +70,13 @@ def place(f):
     if f.get("id") in HIDDEN:
         dropped_findings += 1
         return None
+    if f.get("id") in MOVED:
+        to = MOVED[f["id"]]
+        if to is None:
+            dropped_findings += 1
+            return None
+        moved_findings += 1
+        return {**f, "level": to["level"], "slug": to["slug"]}
     table = REMAP_MARKET if f["level"] == "market" else REMAP_INDUSTRY
     if f["slug"] not in table:
         return f
