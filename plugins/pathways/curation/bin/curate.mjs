@@ -3,7 +3,7 @@
 // Reads and writes the working folder only (outside git). Run with no arguments for help.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ Amend (each writes one new decision record; needs --set and --why)
   curate hide <slug>          off the map; a market's evidence still counts for its industry
   curate delete <slug>        off the map, evidence dropped
   curate add-market <industry-slug> <title> --definition <text> --archetype <A-F> [--evidence <id,id>] [--client <client>]
+  curate move-excerpt <finding-id[,finding-id...]> <market-slug>   one record per excerpt, placed on that market
   curate withdraw <decision-id>
   Add --supersedes <decision-id> to any amendment to tweak an earlier decision.
 
@@ -155,6 +156,7 @@ function describe(r) {
     case "add-industry": return `add industry "${c.title}" under ${c.sector}`;
     case "confirm": return `confirm market ${c.slug}`;
     case "hide-excerpt": return `take excerpt ${c.finding} off the map`;
+    case "move-excerpt": return `move excerpt ${c.finding} to ${c.to}`;
     case "withdraw": return `withdraw ${r.supersedes}`;
     case "accept": return `accept ${Object.keys(c.decisions).length} decision(s)`;
     case "reject": return "reject the set";
@@ -249,6 +251,27 @@ function status() {
 
 // ---------- amend ----------
 
+// Every finding id in the working folder's evidence: the public findings and, on a client's map, the client's own.
+function findingIds() {
+  const client = process.env.PATHWAYS_CLIENT;
+  if (client && !/^[a-z0-9][a-z0-9-]{0,39}$/.test(client)) die("PATHWAYS_CLIENT must be lowercase letters, digits and dashes");
+  const dirs = [join(LANDSCAPE, "evidence", "findings")];
+  if (client) dirs.push(join(WORKSPACE, "client", client, "findings-v2"));
+  const ids = new Set();
+  for (const dir of dirs.filter((d) => existsSync(d))) {
+    for (const name of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
+      let data;
+      try {
+        data = JSON.parse(readFileSync(join(dir, name), "utf8"));
+      } catch {
+        die(`${name} in ${dir} isn't valid JSON`);
+      }
+      for (const f of data.findings ?? []) if (f.id) ids.add(f.id);
+    }
+  }
+  return ids;
+}
+
 function record(op, change, extra = {}) {
   if (!opt.set) die("name the change set with --set <name> (like a branch: one set per piece of work)");
   if (!SET.test(opt.set)) die("--set must be lowercase letters, digits and dashes");
@@ -319,6 +342,17 @@ function amend() {
         ...(opt.client ? { client: opt.client } : {}),
       });
     }
+    case "move-excerpt": {
+      need(2, "move-excerpt <finding-id[,finding-id...]> <market-slug>");
+      const ids = [...new Set(args[0].split(",").map((x) => x.trim()).filter(Boolean))];
+      if (level(args[1]) !== "market") die("move-excerpt places excerpts on a market; name the market second");
+      if (opt.supersedes && ids.length > 1) die("--supersedes tweaks one decision: move one excerpt at a time");
+      const known = findingIds();
+      const missing = ids.filter((id) => !known.has(id));
+      if (missing.length) die(`no finding ${missing.join(", ")} in the working folder's evidence`);
+      for (const id of ids) record("move-excerpt", { finding: id, to: args[1] });
+      return;
+    }
     case "withdraw":
       need(1, "withdraw <decision-id>");
       return record("withdraw", {}, { supersedes: args[0] });
@@ -378,7 +412,7 @@ else if (command === "status") status();
 else if (command === "log") {
   const { entries } = load();
   logFor(entries, args[0]);
-} else if (["rename", "define", "merge", "move", "hide", "delete", "add-market", "withdraw"].includes(command)) amend();
+} else if (["rename", "define", "merge", "move", "hide", "delete", "add-market", "move-excerpt", "withdraw"].includes(command)) amend();
 else if (command === "accept" || command === "reject") review(command);
 else if (command === "effective") effective();
 else if (command === "rebuild") rebuild();

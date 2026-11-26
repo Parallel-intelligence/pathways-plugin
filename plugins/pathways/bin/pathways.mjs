@@ -70,6 +70,10 @@ var OPS = {
 	},
 	confirm: { slug: "slug" },
 	"hide-excerpt": { finding: "finding" },
+	"move-excerpt": {
+		finding: "finding",
+		to: "slug"
+	},
 	withdraw: {},
 	accept: { decisions: "hashes" },
 	reject: {}
@@ -85,7 +89,8 @@ var AMENDMENTS = /* @__PURE__ */ new Set([
 	"add-industry",
 	"add-sector",
 	"confirm",
-	"hide-excerpt"
+	"hide-excerpt",
+	"move-excerpt"
 ]);
 var SET_OPS = /* @__PURE__ */ new Set(["accept", "reject"]);
 var FIELD = {
@@ -223,7 +228,8 @@ function plan(entries, { preview = [] } = {}) {
 /**
 * The structure with the decisions applied, plus where every removed market and industry's
 * evidence now goes: `remap.markets[slug]` is {level, slug} or null (dropped), and
-* `remap.industries[slug]` is a slug or null.
+* `remap.industries[slug]` is a slug or null. `movedFindings[id]` is where a moved excerpt now
+* counts, {level, slug} or null (its market later deleted); it takes the place of the excerpt's own slug.
 */
 function curate(structure, entries, options = {}) {
 	const { active } = plan(entries, options);
@@ -234,6 +240,7 @@ function curate(structure, entries, options = {}) {
 	const industryTo = /* @__PURE__ */ new Map();
 	const applied = [];
 	const hiddenFindings = /* @__PURE__ */ new Set();
+	const movedTo = /* @__PURE__ */ new Map();
 	const elsewhere = /* @__PURE__ */ new Set();
 	const fail = (d, why) => {
 		throw new Error(`${d.id} (${d.op} in set ${d.set}): ${why}`);
@@ -255,7 +262,8 @@ function curate(structure, entries, options = {}) {
 		if ([
 			c.slug,
 			c.from,
-			c.into
+			c.into,
+			c.to
 		].some((x) => elsewhere.has(x))) continue;
 		switch (d.op) {
 			case "rename": {
@@ -355,7 +363,12 @@ function curate(structure, entries, options = {}) {
 			case "confirm":
 				get(d, "market", c.slug).confirmed = true;
 				break;
-			case "hide-excerpt": hiddenFindings.add(c.finding);
+			case "hide-excerpt":
+				hiddenFindings.add(c.finding);
+				break;
+			case "move-excerpt":
+				get(d, "market", c.to);
+				movedTo.set(c.finding, c.to);
 		}
 		applied.push({
 			id: d.id,
@@ -396,6 +409,8 @@ function curate(structure, entries, options = {}) {
 		markets: {},
 		industries: {}
 	};
+	const movedFindings = {};
+	for (const [finding, to] of [...movedTo].sort(([a], [b]) => a < b ? -1 : 1)) movedFindings[finding] = resolveMarket(to);
 	for (const slug of marketTo.keys()) remap.markets[slug] = resolveMarket(slug);
 	for (const slug of industryTo.keys()) remap.industries[slug] = resolveIndustry(slug);
 	s.industries = [...industries.values()];
@@ -404,6 +419,7 @@ function curate(structure, entries, options = {}) {
 		structure: s,
 		remap,
 		hiddenFindings: [...hiddenFindings].sort(),
+		movedFindings,
 		applied
 	};
 }
@@ -3994,7 +4010,7 @@ function readWorkspace(root, rules = RULES) {
 	const add = (map, key, value) => map.set(key, [...map.get(key) ?? [], value]);
 	for (const { data } of kept) {
 		for (const finding of data.findings) {
-			const to = finding.level === "industry" ? placeIndustry(finding.slug) : placeMarket(finding.slug);
+			const to = Object.hasOwn(curated.movedFindings, finding.id) ? curated.movedFindings[finding.id] : finding.level === "industry" ? placeIndustry(finding.slug) : placeMarket(finding.slug);
 			if (to) add(to.level === "industry" ? byIndustry : byMarket, to.slug, excerpt(finding, data.doc.id));
 		}
 		for (const finding of data.proposals ?? []) proposals.set(finding.id, {

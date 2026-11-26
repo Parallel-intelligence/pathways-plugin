@@ -49,11 +49,13 @@ const OPS = {
   "add-industry": { slug: "industrySlug", title: "title", sector: "slug", definition: "definition?" },
   confirm: { slug: "slug" },
   "hide-excerpt": { finding: "finding" },
+  // One excerpt (finding) placed on another market, its document and salience unchanged.
+  "move-excerpt": { finding: "finding", to: "slug" },
   withdraw: {},
   accept: { decisions: "hashes" },
   reject: {},
 };
-export const AMENDMENTS = new Set(["rename", "define", "merge", "move", "hide", "delete", "add-market", "add-industry", "add-sector", "confirm", "hide-excerpt"]);
+export const AMENDMENTS = new Set(["rename", "define", "merge", "move", "hide", "delete", "add-market", "add-industry", "add-sector", "confirm", "hide-excerpt", "move-excerpt"]);
 export const SET_OPS = new Set(["accept", "reject"]);
 
 const FIELD = {
