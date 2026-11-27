@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { curate, pending, sets } from "../src/apply.mjs";
 import { loadLandscape } from "../src/landscape.mjs";
-import { newId, problems, readRecords, SCHEMA, SET, writeRecord } from "../src/records.mjs";
+import { FIT_OPS, newId, problems, readRecords, SCHEMA, SET, writeRecord } from "../src/records.mjs";
 
 const HELP = `curate: view and amend the landscape (sectors -> industries -> markets)
 
@@ -157,6 +157,12 @@ function describe(r) {
     case "confirm": return `confirm market ${c.slug}`;
     case "hide-excerpt": return `take excerpt ${c.finding} off the map`;
     case "move-excerpt": return `move excerpt ${c.finding} to ${c.to}`;
+    case "fit-band": return `fit (${c.client}): ${c.band} band from ${c.was} to ${c.value}`;
+    case "fit-qualify": return `fit (${c.client}): "${c.word}" ${c.qualifies ? "qualifies" : "no longer qualifies"} for ${c.motivation}`;
+    case "fit-placement": return `fit (${c.client}): ${c.axis} placement from ${c.was ?? "not scored"} to ${c.value ?? "not scored"}`;
+    case "fit-axis": return `fit (${c.client}): axis ${c.axis} ${c.on ? "on" : "off"}`;
+    case "fit-primary": return `fit (${c.client}): ${c.market} primary ${c.motivations ? c.motivations.join(" + ") : "from the evidence"}`;
+    case "fit-na": return `fit (${c.client}): ${c.market} ${c.na ? "N/A" : "back in the fit"}`;
     case "withdraw": return `withdraw ${r.supersedes}`;
     case "accept": return `accept ${Object.keys(c.decisions).length} decision(s)`;
     case "reject": return "reject the set";
@@ -367,6 +373,11 @@ function review(op) {
   if (!entries.some((e) => e.record.set === set)) die(`no set ${set}`);
   if (entries.some((e) => e.record.set === set && e.record.op === "reject")) die(`set ${set} was rejected; start a new set for further changes`);
   if (!waiting.length) die(`nothing in ${set} is waiting for review; to undo accepted changes, make new decisions`);
+  // Fit edits (and undos of them) are validated in the pathways tool, by someone at Parallel signed in there who
+  // didn't make them (27 Nov 2026): the CLI can't tell a person's firm, so it accepts none. Rejecting is fine.
+  const ops = new Map(entries.map((e) => [e.record.id, e.record.op]));
+  const fit = waiting.some((e) => FIT_OPS.has(e.record.op) || (e.record.op === "withdraw" && FIT_OPS.has(ops.get(e.record.supersedes) ?? "")));
+  if (op === "accept" && fit) die(`set ${set} holds fit edits: validate them in the pathways tool, signed in`);
   if (op === "accept") apply(structure, entries, [set]); // refuse to accept a set that no longer applies
   const by = who({ allowFlag: false });
   const authors = new Set(waiting.map((e) => e.record.by));

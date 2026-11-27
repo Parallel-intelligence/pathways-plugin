@@ -5,7 +5,7 @@
 // SHA-256, so a file changed after review stops the build. A preview applies a draft set
 // on top, last, without accepting it.
 
-import { AMENDMENTS, SET_OPS } from "./records.mjs";
+import { AMENDMENTS, FIT_OPS, SET_OPS } from "./records.mjs";
 
 /** Which decisions count, in the order the build applies them. */
 export function plan(entries, { preview = [] } = {}) {
@@ -83,6 +83,8 @@ export function curate(structure, entries, options = {}) {
 
   for (const d of active) {
     const c = d.change;
+    // Fit tuning doesn't change the structure: fitParams (packages/fit) reads those records.
+    if (FIT_OPS.has(d.op)) continue;
     if (d.op === "add-market" && c.client && c.client !== (options.client ?? null)) {
       elsewhere.add(c.slug);
       continue;
