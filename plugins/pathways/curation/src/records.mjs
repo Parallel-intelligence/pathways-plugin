@@ -51,14 +51,38 @@ const OPS = {
   "hide-excerpt": { finding: "finding" },
   // One excerpt (finding) placed on another market, its document and salience unchanged.
   "move-excerpt": { finding: "finding", to: "slug" },
+  // Uniqueness fit tuning for one client's map (the pathways tool's Uniqueness tab). Each carries the value the
+  // person saw before (`was`): an edit made on another laptop meanwhile then shows as a conflict, never a silent
+  // overwrite (packages/fit params.mjs).
+  "fit-band": { client: "slug", band: "fitBand", value: "fitNumber", was: "fitWas" },
+  "fit-qualify": { client: "slug", motivation: "fitName", word: "fitWord", qualifies: "boolean", was: "fitWas" },
+  "fit-placement": { client: "slug", axis: "fitAxis", value: "fitNumberOrNull", was: "fitWas" },
+  "fit-axis": { client: "slug", axis: "fitAxis", on: "boolean", was: "fitWas" },
+  "fit-primary": { client: "slug", market: "slug", motivations: "fitMotivations", was: "fitWas" },
+  "fit-na": { client: "slug", market: "slug", na: "boolean", was: "fitWas" },
   withdraw: {},
   accept: { decisions: "hashes" },
   reject: {},
 };
-export const AMENDMENTS = new Set(["rename", "define", "merge", "move", "hide", "delete", "add-market", "add-industry", "add-sector", "confirm", "hide-excerpt", "move-excerpt"]);
+export const FIT_OPS = new Set(["fit-band", "fit-qualify", "fit-placement", "fit-axis", "fit-primary", "fit-na"]);
+export const AMENDMENTS = new Set(["rename", "define", "merge", "move", "hide", "delete", "add-market", "add-industry", "add-sector", "confirm", "hide-excerpt", "move-excerpt", ...FIT_OPS]);
 export const SET_OPS = new Set(["accept", "reject"]);
 
+const FIT_NAME = /^[A-Z][A-Za-z]{1,29}$/;
+const fitNumber = (v) => typeof v === "number" && Number.isFinite(v) && v >= -1 && v <= 1;
+const fitMotivations = (v) => v === null || (Array.isArray(v) && v.length >= 1 && v.length <= 2 && v.every((m) => FIT_NAME.test(m)) && new Set(v).size === v.length);
+
 const FIELD = {
+  boolean: (v) => typeof v === "boolean",
+  fitBand: (v) => v === "leaning" || v === "owned" || v === "opposite",
+  fitName: (v) => typeof v === "string" && FIT_NAME.test(v),
+  fitWord: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= 60,
+  fitAxis: (v) => typeof v === "string" && /^[A-Za-z0-9]{1,12}$/.test(v),
+  fitNumber,
+  fitNumberOrNull: (v) => v === null || fitNumber(v),
+  fitMotivations,
+  // The value before the edit: any of the values above, or null (nothing set yet).
+  fitWas: (v) => v === null || typeof v === "boolean" || fitNumber(v) || fitMotivations(v),
   level: (v) => LEVELS.has(v),
   slug: (v) => typeof v === "string" && SLUG.test(v),
   industrySlug: (v) => typeof v === "string" && INDUSTRY_SLUG.test(v),
@@ -90,6 +114,8 @@ export function problems(r) {
   if (r.supersedes != null && !ID.test(r.supersedes)) out.push("supersedes must be a record id");
   if (r.op === "withdraw" && !r.supersedes) out.push("withdraw needs supersedes");
   if (SET_OPS.has(r.op) && r.supersedes) out.push(`${r.op} can't supersede a record`);
+  // A fit edit says the value it replaces (`was`), which a superseded record would hide: undo it, then edit again.
+  if (FIT_OPS.has(r.op) && r.supersedes) out.push(`${r.op} can't supersede a record: undo it, then make a new edit`);
   const change = r.change ?? {};
   const allowed = OPS[r.op];
   for (const key of Object.keys(change)) if (!(key in allowed)) out.push(`change.${key} isn't part of ${r.op}`);

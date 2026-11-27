@@ -67,11 +67,28 @@ if tool:
         raise SystemExit(result.stderr.strip() or "curate effective failed")
     curated = json.loads(result.stdout)
     minted = [m for m in curated["structure"]["markets"] if m.get("origin") in ("curation", "minted")]
-    # Excerpts a decision moved to another market show there, as build-map.py counts them. Like markets added
-    # by decision, moves apply only when the curate tool runs the build (PATHWAYS_CURATE).
-    moved = curated.get("movedFindings", {})
-    findings = [f if f.get("id") not in moved else {**f, "level": moved[f["id"]]["level"], "slug": moved[f["id"]]["slug"]}
-                for f in findings if f.get("id") not in moved or moved[f["id"]] is not None]
+    # Place every finding where build-map.py counts it (its place()): excerpts taken off are dropped, moved
+    # excerpts go to their new market, and evidence of merged, hidden or deleted markets and industries goes
+    # where the remap says (a hidden market's to its industry). Like markets added by decision, this applies
+    # only when the curate tool runs the build (PATHWAYS_CURATE).
+    hidden, moved = set(curated.get("hiddenFindings", [])), curated.get("movedFindings", {})
+    remap_market, remap_industry = curated["remap"]["markets"], curated["remap"]["industries"]
+
+    def place(f):
+        if f.get("id") in hidden:
+            return None
+        if f.get("id") in moved:
+            to = moved[f["id"]]
+            return None if to is None else {**f, "level": to["level"], "slug": to["slug"]}
+        table = remap_market if f["level"] == "market" else remap_industry
+        if f["slug"] not in table:
+            return f
+        to = table[f["slug"]]
+        if to is None:
+            return None
+        return {**f, "level": to["level"], "slug": to["slug"]} if f["level"] == "market" else {**f, "slug": to}
+
+    findings = [p for p in map(place, findings) if p is not None]
 else:
     minted = json.loads((ROOT / "landscape" / "minted-markets.json").read_text())["markets"]
     if CLIENT and (ROOT / "client" / CLIENT / "minted-markets.json").exists():

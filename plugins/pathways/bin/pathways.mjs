@@ -74,10 +74,55 @@ var OPS = {
 		finding: "finding",
 		to: "slug"
 	},
+	"fit-band": {
+		client: "slug",
+		band: "fitBand",
+		value: "fitNumber",
+		was: "fitWas"
+	},
+	"fit-qualify": {
+		client: "slug",
+		motivation: "fitName",
+		word: "fitWord",
+		qualifies: "boolean",
+		was: "fitWas"
+	},
+	"fit-placement": {
+		client: "slug",
+		axis: "fitAxis",
+		value: "fitNumberOrNull",
+		was: "fitWas"
+	},
+	"fit-axis": {
+		client: "slug",
+		axis: "fitAxis",
+		on: "boolean",
+		was: "fitWas"
+	},
+	"fit-primary": {
+		client: "slug",
+		market: "slug",
+		motivations: "fitMotivations",
+		was: "fitWas"
+	},
+	"fit-na": {
+		client: "slug",
+		market: "slug",
+		na: "boolean",
+		was: "fitWas"
+	},
 	withdraw: {},
 	accept: { decisions: "hashes" },
 	reject: {}
 };
+var FIT_OPS = /* @__PURE__ */ new Set([
+	"fit-band",
+	"fit-qualify",
+	"fit-placement",
+	"fit-axis",
+	"fit-primary",
+	"fit-na"
+]);
 var AMENDMENTS = /* @__PURE__ */ new Set([
 	"rename",
 	"define",
@@ -90,10 +135,23 @@ var AMENDMENTS = /* @__PURE__ */ new Set([
 	"add-sector",
 	"confirm",
 	"hide-excerpt",
-	"move-excerpt"
+	"move-excerpt",
+	...FIT_OPS
 ]);
 var SET_OPS = /* @__PURE__ */ new Set(["accept", "reject"]);
+var FIT_NAME = /^[A-Z][A-Za-z]{1,29}$/;
+var fitNumber = (v) => typeof v === "number" && Number.isFinite(v) && v >= -1 && v <= 1;
+var fitMotivations = (v) => v === null || Array.isArray(v) && v.length >= 1 && v.length <= 2 && v.every((m) => FIT_NAME.test(m)) && new Set(v).size === v.length;
 var FIELD = {
+	boolean: (v) => typeof v === "boolean",
+	fitBand: (v) => v === "leaning" || v === "owned" || v === "opposite",
+	fitName: (v) => typeof v === "string" && FIT_NAME.test(v),
+	fitWord: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= 60,
+	fitAxis: (v) => typeof v === "string" && /^[A-Za-z0-9]{1,12}$/.test(v),
+	fitNumber,
+	fitNumberOrNull: (v) => v === null || fitNumber(v),
+	fitMotivations,
+	fitWas: (v) => v === null || typeof v === "boolean" || fitNumber(v) || fitMotivations(v),
 	level: (v) => LEVELS$1.has(v),
 	slug: (v) => typeof v === "string" && SLUG$2.test(v),
 	industrySlug: (v) => typeof v === "string" && INDUSTRY_SLUG.test(v),
@@ -127,6 +185,7 @@ function problems(r) {
 	if (r.supersedes != null && !ID$1.test(r.supersedes)) out.push("supersedes must be a record id");
 	if (r.op === "withdraw" && !r.supersedes) out.push("withdraw needs supersedes");
 	if (SET_OPS.has(r.op) && r.supersedes) out.push(`${r.op} can't supersede a record`);
+	if (FIT_OPS.has(r.op) && r.supersedes) out.push(`${r.op} can't supersede a record: undo it, then make a new edit`);
 	const change = r.change ?? {};
 	const allowed = OPS[r.op];
 	for (const key of Object.keys(change)) if (!(key in allowed)) out.push(`change.${key} isn't part of ${r.op}`);
@@ -255,6 +314,7 @@ function curate(structure, entries, options = {}) {
 	};
 	for (const d of active) {
 		const c = d.change;
+		if (FIT_OPS.has(d.op)) continue;
 		if (d.op === "add-market" && c.client && c.client !== (options.client ?? null)) {
 			elsewhere.add(c.slug);
 			continue;
@@ -485,11 +545,11 @@ function personalSet(email, entries) {
 }
 //#endregion
 //#region ../../packages/curation/src/landscape.mjs
-var CLIENT = /^[a-z0-9][a-z0-9-]{0,39}$/;
+var CLIENT$1 = /^[a-z0-9][a-z0-9-]{0,39}$/;
 function loadLandscape(workspace, client = "") {
 	const landscape = join(workspace, "landscape");
 	const structure = JSON.parse(readFileSync(join(landscape, "structure.json"), "utf8"));
-	if (client && !CLIENT.test(client)) throw new Error(`client ${client} isn't a plain name`);
+	if (client && !CLIENT$1.test(client)) throw new Error(`client ${client} isn't a plain name`);
 	const mintedFiles = [join(landscape, "minted-markets.json"), ...client ? [join(workspace, "client", client, "minted-markets.json")] : []];
 	const have = new Set(structure.markets.map((m) => m.slug));
 	for (const file of mintedFiles) {
@@ -2080,7 +2140,7 @@ function converterFor(original, textFile) {
 var sha256Of$1 = (file) => createHash("sha256").update(readFileSync(file)).digest("hex");
 /** A plain file: not a folder, and not a link (never followed). */
 var isFile = (file) => existsSync(file) && lstatSync(file).isFile();
-var readJson$3 = (file) => JSON.parse(readFileSync(file, "utf8"));
+var readJson$4 = (file) => JSON.parse(readFileSync(file, "utf8"));
 /** Files under a folder, links skipped, never followed. */
 function walk$1(dir, skip = () => false) {
 	if (!existsSync(dir) || !lstatSync(dir).isDirectory()) return [];
@@ -2099,7 +2159,7 @@ function findingsDocs(folder) {
 	return walk$1(folder).filter((file) => file.endsWith(".json")).map((file) => {
 		let doc;
 		try {
-			doc = readJson$3(file).doc;
+			doc = readJson$4(file).doc;
 		} catch {
 			doc = null;
 		}
@@ -2131,7 +2191,7 @@ function indexedFiles(clientDir) {
 	for (const file of walk$1(clientDir, skip).filter((each) => each.endsWith(".json"))) {
 		let value;
 		try {
-			value = readJson$3(file);
+			value = readJson$4(file);
 		} catch {
 			continue;
 		}
@@ -2184,7 +2244,7 @@ function planLibrary(root, client, licensed) {
 		});
 	};
 	const evidence = path.join(root, "landscape", "evidence");
-	const meta = isFile(path.join(evidence, "doc-meta.json")) ? readJson$3(path.join(evidence, "doc-meta.json")) : {};
+	const meta = isFile(path.join(evidence, "doc-meta.json")) ? readJson$4(path.join(evidence, "doc-meta.json")) : {};
 	for (const doc of findingsDocs(path.join(evidence, "findings"))) {
 		if (typeof doc.id !== "string" || !ID.test(doc.id)) {
 			count("left out: an id that isn't a plain name");
@@ -2323,7 +2383,7 @@ function writeManifest(root, manifest) {
 function readManifest(root) {
 	const file = path.join(root, MANIFEST);
 	if (!isFile(file)) throw new Error("There's no .pathways-library.json yet: run library-plan first.");
-	const manifest = readJson$3(file);
+	const manifest = readJson$4(file);
 	if (manifest?.schema !== SCHEMA || !Array.isArray(manifest.documents)) throw new Error(".pathways-library.json isn't in the expected shape: run library-plan again.");
 	return manifest;
 }
@@ -2545,7 +2605,7 @@ var shown = (file) => {
 * A JSON file, or `fallback` when there's none. One that doesn't parse is named, never quoted: JSON.parse's message
 * carries a piece of the file, and the message reaches the page and error.txt (as workspace.ts logs only an error's kind).
 */
-function readJson$2(file, fallback) {
+function readJson$3(file, fallback) {
 	if (!isFile(file)) return fallback;
 	try {
 		return JSON.parse(readFileSync(file, "utf8"));
@@ -2582,7 +2642,7 @@ function mergeById(existing, incoming, drop = []) {
 function updateList(file, incoming, drop = []) {
 	const ids = [...drop];
 	if ((Array.isArray(incoming) ? incoming.length === 0 : Object.keys(incoming).length === 0) && (ids.length === 0 || !isFile(file))) return;
-	writeJson(file, mergeById(readJson$2(file, Array.isArray(incoming) ? [] : {}), incoming, ids));
+	writeJson(file, mergeById(readJson$3(file, Array.isArray(incoming) ? [] : {}), incoming, ids));
 }
 /** The findings files in a folder, by the document id inside each (doc.id), not their names. */
 function findingsByDoc(folder) {
@@ -2620,11 +2680,11 @@ var idInTool = (doc, clientIds) => documentId(doc.sha256, filedAsClient(doc, cli
 */
 var filedByFolderOnly = (doc, clientIds) => filedAsClient(doc, clientIds) && !doc.clientFiledAt;
 /** Ids a pipeline's text.json records as unreadable. */
-var unreadableIn = (file) => new Set(Object.entries(readJson$2(file, {})).filter(([, entry]) => entry?.unreadable).map(([id]) => id));
+var unreadableIn = (file) => new Set(Object.entries(readJson$3(file, {})).filter(([, entry]) => entry?.unreadable).map(([id]) => id));
 /** documents/index.json's list (written by Fetch latest), or none before the first fetch. */
 function indexDocuments(root) {
 	const index = path.join(root, "documents", "index.json");
-	return isFile(index) ? readJson$2(index, {}).documents ?? [] : [];
+	return isFile(index) ? readJson$3(index, {}).documents ?? [] : [];
 }
 /**
 * What the client's own documents left in the public evidence (Analyse before 13 Nov filed them there): public
@@ -2636,9 +2696,9 @@ function misfiled(root, documents, publicFiles = findingsByDoc(folders(root, "pu
 	const clientIds = new Set(documents.filter((doc) => doc.confidentiality === "client" || filedAsClient(doc, ownIds)).flatMap((doc) => [documentId(doc.sha256, "client"), documentId(doc.sha256, doc.confidentiality)]));
 	const pub = folders(root, "public", null);
 	const listed = /* @__PURE__ */ new Set([
-		...readJson$2(pub.docsList, []).map((entry) => String(entry?.id)),
-		...Object.keys(readJson$2(path.join(pub.base, "doc-meta.json"), {})),
-		...Object.keys(readJson$2(pub.textList, {})),
+		...readJson$3(pub.docsList, []).map((entry) => String(entry?.id)),
+		...Object.keys(readJson$3(path.join(pub.base, "doc-meta.json"), {})),
+		...Object.keys(readJson$3(pub.textList, {})),
 		...[pub.parts, pub.partsOut].flatMap((dir) => isDir(dir) ? readdirSync(dir).map((name) => name.replace(/\.p\d+\.(txt|json)$/, "")) : [])
 	]);
 	return {
@@ -2664,7 +2724,7 @@ function planRun(root, client, documents, everything = false) {
 		public: unreadableIn(folders(root, "public", null).textList),
 		client: client ? unreadableIn(folders(root, "client", client).textList) : /* @__PURE__ */ new Set()
 	};
-	const toolRead = new Set(client ? readJson$2(folders(root, "client", client).docsList, []).filter((entry) => entry?.readBy === READ_BY_TOOL).map((entry) => String(entry.id)) : []);
+	const toolRead = new Set(client ? readJson$3(folders(root, "client", client).docsList, []).filter((entry) => entry?.readBy === READ_BY_TOOL).map((entry) => String(entry.id)) : []);
 	const left = misfiled(root, documents, publicFiles, ownIds);
 	const plan = {
 		read: [],
@@ -2843,7 +2903,7 @@ var READ_WITH = (root) => path.join(root, "landscape", "evidence", "read-with.js
 /** What the last read used (read-with.json): its reading rules, and the structure's hash where it was recorded. */
 function readWith(root) {
 	try {
-		const value = readJson$2(READ_WITH(root), null);
+		const value = readJson$3(READ_WITH(root), null);
 		if (!value) return {
 			reading: null,
 			structure: null
@@ -3111,7 +3171,7 @@ function queueUpload(root, client, each) {
 	const file = folders(root, each.planned.route, client).uploads;
 	const { sha256, confidentiality } = each.planned.doc;
 	writeJson(file, {
-		...readJson$2(file, {}),
+		...readJson$3(file, {}),
 		[each.planned.id]: {
 			sha256,
 			confidentiality,
@@ -3207,7 +3267,7 @@ async function prepareTexts({ root, client, read, call, convert = pagesOf, macos
 	}
 	if (stopped()) throw new Error("Stopped.");
 	const routes = client ? ["public", "client"] : ["public"];
-	const queues = Object.fromEntries(routes.map((route) => [route, readJson$2(folders(root, route, client).uploads, {})]));
+	const queues = Object.fromEntries(routes.map((route) => [route, readJson$3(folders(root, route, client).uploads, {})]));
 	const items = routes.flatMap((route) => Object.entries(queues[route]).flatMap(([id, entry]) => {
 		const file = path.join(folders(root, route, client).text, `${id}.txt`);
 		const idOk = (sha256, confidentiality) => documentId(sha256, confidentiality) === id || route === "client" && documentId(sha256, "client") === id;
@@ -3292,6 +3352,294 @@ function builtWith(root) {
 	} catch {
 		return null;
 	}
+}
+//#endregion
+//#region ../../packages/fit/src/engine.mjs
+/** The motivations that get a verdict: the spec's six less Obligation, which is only ever a market flag. */
+var SCORED = [
+	"Compete",
+	"Connect",
+	"Wellbeing",
+	"Express",
+	"Play"
+];
+[...SCORED];
+/** The spec's own defaults: what holds until a decision changes it. */
+function defaults(spec, brand) {
+	return {
+		bands: {
+			leaning: spec.bands.leaning_from,
+			owned: spec.bands.owned_from,
+			opposite: -.2
+		},
+		qualify: Object.fromEntries(Object.entries(spec.motivations).map(([m, v]) => [m, [...v.qualifying]])),
+		placements: { ...spec.reference_inputs?.[brand] ?? {} },
+		axesOff: [],
+		primaries: {},
+		na: []
+	};
+}
+/** Each word's value from the brand's placements: the positive pole takes the value, the negative pole its opposite. */
+function wordValues(spec, params) {
+	const off = new Set(params.axesOff);
+	const values = {};
+	for (const [axis, poles] of Object.entries(spec.axes)) {
+		const x = Object.hasOwn(params.placements, axis) ? params.placements[axis] : null;
+		if (off.has(axis) || x == null) continue;
+		values[poles.positive] = round(x);
+		values[poles.negative] = round(-x);
+	}
+	return values;
+}
+var round = (x) => Math.round(x * 100) / 100 + 0;
+function state(x, bands) {
+	if (x == null) return "not scored";
+	if (x >= bands.owned) return "owned";
+	if (x >= bands.leaning) return "leaning";
+	if (x <= bands.opposite) return "opposite";
+	return "hedged";
+}
+/** Each motivation's verdict, and the qualifying words that carried it. */
+function verdicts(spec, params) {
+	const values = wordValues(spec, params);
+	const out = {};
+	for (const m of SCORED) {
+		const words = params.qualify[m] ?? [];
+		const states = Object.fromEntries(words.map((w) => [w, state(values[w], params.bands)]));
+		const via = words.filter((w) => states[w] === "owned" || states[w] === "leaning");
+		const all = Object.values(states);
+		out[m] = {
+			verdict: all.includes("owned") ? "Great" : via.length ? "Great (provisional)" : all.some((s) => s !== "not scored") ? "Bad" : "Not assessed",
+			via,
+			states
+		};
+	}
+	return out;
+}
+var counts = (cells, motivations) => [motivations.filter((m) => cells[m].verdict.startsWith("Great")).length, motivations.filter((m) => cells[m].verdict === "Bad").length];
+/** A rollup over some motivations: more Great than Bad is Great fit, the reverse Bad fit, a tie Risky. */
+function rollup(cells, motivations) {
+	const [great, bad] = counts(cells, motivations);
+	return {
+		verdict: great > bad ? "Great fit" : bad > great ? "Bad fit" : "Risky",
+		great,
+		bad
+	};
+}
+/**
+* The spec is only used when it reproduces its own reference run at every band it gives: the reference run is the
+* test (spec, "reference_results"). Returns the problems, empty when it does.
+*/
+function specProblems(spec) {
+	const out = [];
+	if (!spec || typeof spec !== "object" || !spec.axes || !spec.motivations || !spec.bands) return ["the spec has no axes, motivations or bands"];
+	for (const m of SCORED) if (!spec.motivations[m]) out.push(`the spec has no ${m}`);
+	if (out.length) return out;
+	const results = Object.entries(spec.reference_results ?? {}).filter(([key]) => key.startsWith("new|"));
+	if (!results.length) return ["the spec has no reference run to check against"];
+	for (const [key, expected] of results) {
+		const [, brand, band] = key.split("|");
+		const params = defaults(spec, brand);
+		params.bands.leaning = Number(band);
+		const cells = verdicts(spec, params);
+		const got = Object.fromEntries(SCORED.map((m) => [m, cells[m].verdict]));
+		const sameCells = SCORED.every((m) => got[m] === expected.cells?.[m]);
+		const sameRollup = rollup(cells, SCORED).verdict === expected.rollup;
+		if (!sameCells || !sameRollup) out.push(`the reference run ${key} doesn't come out as the spec says`);
+	}
+	return out;
+}
+//#endregion
+//#region ../../packages/fit/src/evidence.mjs
+var CLIENT = /^[a-z0-9][a-z0-9-]{0,39}$/;
+var readJson$2 = (file) => JSON.parse(readFileSync(file, "utf8"));
+var jsonFiles = (dir) => existsSync(dir) ? readdirSync(dir).filter((n) => n.endsWith(".json")).sort().map((n) => join(dir, n)) : [];
+function fitFolder(workspace, client) {
+	if (!CLIENT.test(client ?? "")) throw new Error(`client ${client} isn't a plain name`);
+	return join(workspace, "client", client, "fit");
+}
+/** Whether the working folder has fit inputs for this client yet. */
+function hasFit(workspace, client) {
+	return existsSync(join(fitFolder(workspace, client), "spec.json"));
+}
+/** The spec, refused unless it reproduces its own reference run. */
+function readSpec(workspace, client) {
+	const spec = readJson$2(join(fitFolder(workspace, client), "spec.json"));
+	const bad = specProblems(spec);
+	if (bad.length) throw new Error(`client/${client}/fit/spec.json can't be used: ${bad.join("; ")}`);
+	return spec;
+}
+/** Where a finding's evidence counts after curation: a unit slug, or null when it no longer counts. */
+function placer(curated) {
+	const hidden = new Set(curated?.hiddenFindings ?? []);
+	const moved = curated?.movedFindings ?? {};
+	const markets = curated?.remap?.markets ?? {};
+	const industries = curated?.remap?.industries ?? {};
+	return (id, level, slug) => {
+		if (id && hidden.has(id)) return null;
+		if (id && id in moved) return moved[id]?.slug ?? null;
+		if (!slug) return null;
+		if (level === "industry") return slug in industries ? industries[slug] : slug;
+		return slug in markets ? markets[slug]?.slug ?? null : slug;
+	};
+}
+/**
+* The demand rows the fit scores: extraction's own motivations (public findings and the client's), then the
+* motivation tags, with &go&co's reviewed calls in place of the tag's own at full confidence.
+*/
+function readRows(workspace, client, curated) {
+	const place = placer(curated);
+	const rows = [];
+	const folders = [join(workspace, "landscape", "evidence", "findings"), join(workspace, "client", client, "findings-v2")];
+	for (const file of folders.flatMap(jsonFiles)) {
+		const data = readJson$2(file);
+		const grade = data.doc?.grade;
+		for (const f of data.findings ?? []) {
+			if (f.type !== "demand" || !f.motivation) continue;
+			const unit = place(f.id, f.level ?? "market", f.slug ?? f.proposedMarket);
+			if (unit) rows.push({
+				unit,
+				motivation: f.motivation.toLowerCase(),
+				salience: f.salience ?? 0,
+				grade,
+				doc: data.doc?.id ?? file,
+				confidence: 1,
+				tagged: false
+			});
+		}
+	}
+	const dir = fitFolder(workspace, client);
+	const tagsFile = join(dir, "motivation-tags.json");
+	if (existsSync(tagsFile)) {
+		const reviewsFile = join(dir, "motivation-reviews.json");
+		const reviews = existsSync(reviewsFile) ? readJson$2(reviewsFile).calls ?? {} : {};
+		for (const t of readJson$2(tagsFile)) {
+			const review = reviews[t.findingId];
+			const motivation = review ? review.motivation : t.motivation;
+			const unit = place(t.findingId, t.market?.startsWith("in-") || t.market?.startsWith("st-") ? "industry" : "market", t.market);
+			if (unit && motivation) rows.push({
+				unit,
+				motivation: String(motivation).toLowerCase(),
+				salience: t.salience ?? 0,
+				grade: t.grade,
+				doc: t.docId,
+				confidence: review ? 1 : t.confidence,
+				tagged: true
+			});
+		}
+	}
+	return rows;
+}
+/** Leaders per market slug, as leaders.json keeps them. */
+function readLeaders(workspace, client) {
+	const file = join(fitFolder(workspace, client), "leaders.json");
+	if (!existsSync(file)) return {};
+	return Object.fromEntries(readJson$2(file).map((x) => [x.market, x]));
+}
+//#endregion
+//#region ../../packages/fit/src/params.mjs
+/** The setting a fit record changes, as a key, and how to read and write it in the params. */
+var SETTINGS = {
+	"fit-band": {
+		key: (c) => `band:${c.band}`,
+		result: (c) => c.value,
+		get: (p, c) => own(p.bands, c.band) ?? null,
+		set: (p, c) => p.bands[c.band] = c.value
+	},
+	"fit-qualify": {
+		key: (c) => `qualify:${c.motivation}:${c.word}`,
+		result: (c) => c.qualifies,
+		get: (p, c) => (own(p.qualify, c.motivation) ?? []).includes(c.word),
+		set: (p, c) => {
+			const words = (own(p.qualify, c.motivation) ?? []).filter((w) => w !== c.word);
+			p.qualify[c.motivation] = c.qualifies ? [...words, c.word] : words;
+		}
+	},
+	"fit-placement": {
+		key: (c) => `placement:${c.axis}`,
+		result: (c) => c.value,
+		get: (p, c) => own(p.placements, c.axis) ?? null,
+		set: (p, c) => p.placements[c.axis] = c.value
+	},
+	"fit-axis": {
+		key: (c) => `axis:${c.axis}`,
+		result: (c) => c.on,
+		get: (p, c) => !p.axesOff.includes(c.axis),
+		set: (p, c) => p.axesOff = c.on ? p.axesOff.filter((a) => a !== c.axis) : [.../* @__PURE__ */ new Set([...p.axesOff, c.axis])]
+	},
+	"fit-primary": {
+		key: (c) => `primary:${c.market}`,
+		result: (c) => c.motivations ?? null,
+		get: (p, c) => own(p.primaries, c.market) ?? null,
+		set: (p, c) => {
+			if (c.motivations) p.primaries[c.market] = [...c.motivations];
+			else delete p.primaries[c.market];
+		}
+	},
+	"fit-na": {
+		key: (c) => `na:${c.market}`,
+		result: (c) => c.na,
+		get: (p, c) => p.na.includes(c.market),
+		set: (p, c) => p.na = c.na ? [.../* @__PURE__ */ new Set([...p.na, c.market])] : p.na.filter((m) => m !== c.market)
+	}
+};
+var same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** A setting's own value only: a name such as "constructor" never reads one from Object.prototype. */
+var own = (object, key) => Object.hasOwn(object, key) ? object[key] : void 0;
+/** The value a setting has in params now: what a new edit records as `was`. */
+function currentValue(params, op, change) {
+	return structuredClone(SETTINGS[op].get(params, change));
+}
+/**
+* Params for `client` (its brand's placements are the spec's reference inputs under `brand`, by default the client).
+* Returns { params, conflicts, history, problems }: `history[key]` lists the records that set it, oldest first, with
+* who and when, so the page can show where every value came from; `problems`, bands that can't work together.
+*/
+function fitParams(spec, entries, { client, brand = client, preview = [] } = {}) {
+	const params = defaults(spec, brand);
+	const conflicts = [];
+	const history = {};
+	const { active, acceptedAt } = plan(entries, { preview });
+	const order = (a, b) => Number(!acceptedAt.has(a.id)) - Number(!acceptedAt.has(b.id)) || Date.parse(a.at) - Date.parse(b.at) || (a.id < b.id ? -1 : 1);
+	const fit = active.filter((r) => FIT_OPS.has(r.op) && r.change.client === client).sort(order);
+	for (const r of fit) {
+		const setting = SETTINGS[r.op];
+		const key = setting.key(r.change);
+		const before = setting.get(params, r.change);
+		const entry = {
+			id: r.id,
+			set: r.set,
+			by: r.by,
+			at: r.at,
+			why: r.why,
+			accepted: acceptedAt.has(r.id)
+		};
+		if (!same(before, r.change.was) && !same(before, setting.result(r.change))) {
+			conflicts.push({
+				...entry,
+				key,
+				expected: r.change.was,
+				found: before
+			});
+			continue;
+		}
+		setting.set(params, r.change);
+		(history[key] ??= []).push(entry);
+	}
+	return {
+		params,
+		conflicts,
+		history,
+		problems: bandProblems(params.bands)
+	};
+}
+/** Bands that can't work together: Owned must start above Leaning, and Opposite below zero. */
+function bandProblems(bands) {
+	const out = [];
+	if (!(bands.owned > bands.leaning)) out.push("Owned has to start above Leaning");
+	if (!(bands.leaning > 0)) out.push("Leaning has to start above zero");
+	if (!(bands.opposite < 0)) out.push("Opposite has to be below zero");
+	return out;
 }
 //#endregion
 //#region decisions.ts
@@ -3379,6 +3727,16 @@ function writeAll(root, records) {
 	} catch (error) {
 		throw new Refusal(`That change doesn't apply: ${error.message}.`);
 	}
+	if (records.some((each) => FIT_OPS.has(each.op))) {
+		const fit = fitContext(root);
+		const after = fitParams(fit.spec, added, {
+			client: fit.client,
+			preview: openSets(added)
+		});
+		const ids = new Set(records.map((each) => each.id));
+		if (after.conflicts.some((each) => ids.has(each.id))) throw new Refusal("That fit setting changed meanwhile: reload the Uniqueness tab and make the change again.");
+		if (after.problems.length) throw new Refusal(`That fit setting doesn't work: ${after.problems.join("; ")}.`);
+	}
 	const dir = path.join(root, "landscape", "decisions");
 	mkdirSync(dir, {
 		recursive: true,
@@ -3390,6 +3748,39 @@ function writeAll(root, records) {
 }
 /** A problem the person can act on: its message goes back to the page. */
 var Refusal = class extends Error {};
+/** The client a fit edit is for, and its spec (packages/fit): refused when the working folder has no fit for it yet. */
+function fitContext(root) {
+	const client = clientId();
+	if (!client) throw new Refusal("The fit is for a client's map: there's no client set for this working folder.");
+	if (!hasFit(root, client)) throw new Refusal(`The working folder has no fit for ${client} yet (client/${client}/fit/spec.json).`);
+	try {
+		return {
+			client,
+			spec: readSpec(root, client)
+		};
+	} catch (error) {
+		const message = error.message;
+		throw new Refusal(/fit\/spec\.json can't be used/.test(message) ? message : `client/${client}/fit/spec.json couldn't be read (${error.name}).`);
+	}
+}
+/**
+* A fit edit as it's recorded: for the working folder's client, with the value it replaces (`was`) as the folder has it
+* now, accepted edits and every open one on top, as the page shows them. `earlier`: records this request makes before it.
+*/
+function fitChange(root, entries, earlier, op, change) {
+	const fit = fitContext(root);
+	const all = [...entries, ...earlier.map(entry)];
+	const { params } = fitParams(fit.spec, all, {
+		client: fit.client,
+		preview: openSets(all)
+	});
+	const { client: _client, was: _was, ...rest } = change;
+	return {
+		...rest,
+		client: fit.client,
+		was: currentValue(params, op, rest)
+	};
+}
 /** The records an edit makes. "unhide-excerpt" isn't a record: it withdraws the hides still in force for that excerpt. */
 function recordsFor(root, by, label, ops) {
 	const { entries } = loadLandscape(root, clientId() ?? "");
@@ -3402,7 +3793,8 @@ function recordsFor(root, by, label, ops) {
 		const hides = entries.filter((each) => each.record.op === "hide-excerpt" && each.record.change.finding === change.finding && !superseded.has(each.record.id));
 		if (hides.length === 0) throw new Refusal("That excerpt isn't hidden by a decision.");
 		for (const each of hides) out.push(record(by, set, label, "withdraw", {}, each.record.id, next()));
-	} else if (AMENDMENTS.has(op)) out.push(record(by, set, label, op, change, null, next()));
+	} else if (FIT_OPS.has(op)) out.push(record(by, set, label, op, fitChange(root, entries, out, op, change), null, next()));
+	else if (AMENDMENTS.has(op)) out.push(record(by, set, label, op, change, null, next()));
 	else throw new Refusal(`The tool can't save a ${op} edit.`);
 	return out;
 }
@@ -3425,12 +3817,32 @@ function undoRecords(root, by, label, ids) {
 		}
 		const withdrawn = original.supersedes ? byId.get(original.supersedes) : void 0;
 		if (!withdrawn || !AMENDMENTS.has(withdrawn.op)) throw new Refusal("What that change undid can't be made again here.");
-		return record(by, set, label, withdrawn.op, withdrawn.change, null, new Date(at++));
+		const change = FIT_OPS.has(withdrawn.op) ? fitChange(root, entries, [], withdrawn.op, withdrawn.change) : withdrawn.change;
+		return record(by, set, label, withdrawn.op, change, null, new Date(at++));
 	});
 }
-/** Accepts every open set: the person validating has looked at all of it on screen. */
-function acceptAll(root, by) {
+/**
+* Accepts every open set: the person validating has looked at all of it on screen. Fit edits are validated by someone at
+* Parallel who didn't make them (decided by Christian, 27 Nov 2026), and only once no two of them disagree.
+*/
+function acceptAll(root, by, firm) {
 	const { entries } = loadLandscape(root, clientId() ?? "");
+	const byId = new Map(entries.map((each) => [each.record.id, each.record]));
+	const open = openSets(entries).flatMap((set) => pending(entries, set).map((each) => each.record));
+	const isFit = (r) => FIT_OPS.has(r.op) || r.op === "withdraw" && FIT_OPS.has(byId.get(r.supersedes ?? "")?.op ?? "");
+	const fitEdits = open.filter(isFit);
+	if (fitEdits.length) {
+		if (firm !== "parallel") throw new Refusal("Fit edits are validated by someone at Parallel, signed in to the pathways tool.");
+		if (fitEdits.some((each) => each.by.toLowerCase() === by.toLowerCase())) throw new Refusal("Some of the open fit edits are yours: someone else at Parallel validates them.");
+	}
+	if (fitEdits.length || entries.some((each) => FIT_OPS.has(each.record.op))) {
+		const fit = fitContext(root);
+		const { conflicts } = fitParams(fit.spec, entries, {
+			client: fit.client,
+			preview: openSets(entries)
+		});
+		if (conflicts.length) throw new Refusal(`${conflicts.length} fit ${conflicts.length === 1 ? "edit no longer starts" : "edits no longer start"} from the value ${conflicts.length === 1 ? "it" : "they"} replaced: undo or make ${conflicts.length === 1 ? "it" : "them"} again on the Uniqueness tab first.`);
+	}
 	let at = Date.now();
 	return openSets(entries).map((set) => record(by, set, "Validated in the pathways tool", "accept", { decisions: Object.fromEntries(pending(entries, set).map((each) => [each.record.id, each.sha256])) }, null, new Date(at++)));
 }
@@ -3495,7 +3907,7 @@ function rebuildAccepted(landscapeDir, root, client) {
 * `client`: the client whose map Validate rebuilds, found before it starts (the standalone tool's is
 * cloudflare.ts workingStateClient); PATHWAYS_CLIENT alone on the dev server.
 */
-function decisionsHandler(landscapeDir, who, reviewer = who, client = async () => clientId()) {
+function decisionsHandler(landscapeDir, who, reviewer = who, client = async () => clientId(), reviewerFirm = async () => null, signedIn) {
 	return (req, res, next) => {
 		const route = (req.url ?? "").split("?")[0];
 		if (![
@@ -3516,17 +3928,26 @@ function decisionsHandler(landscapeDir, who, reviewer = who, client = async () =
 				if (route === "/workspace/decisions") {
 					const ops = body.ops;
 					if (!Array.isArray(ops) || ops.length === 0 || ops.length > MAX_OPS || !ops.every((each) => each && typeof each.op === "string" && each.change && typeof each.change === "object" && !Array.isArray(each.change))) throw new Refusal("The change didn't come through in the expected shape.");
+					if (signedIn && ops.some((each) => FIT_OPS.has(each.op)) && await signedIn() !== by) throw new Refusal("Sign in first: fit edits carry the name you're signed in with.");
 					return json$3(res, 200, { ids: writeAll(root, recordsFor(root, by, label, ops)) });
 				}
 				if (route === "/workspace/decisions/undo") {
 					const ids = body.ids;
 					if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_OPS || !ids.every((id) => typeof id === "string")) throw new Refusal("Nothing to undo.");
+					if (signedIn && await signedIn() !== by) {
+						const byId = new Map(loadLandscape(root, clientId() ?? "").entries.map((each) => [each.record.id, each.record]));
+						const fit = (id) => {
+							const r = byId.get(id);
+							return Boolean(r && (FIT_OPS.has(r.op) || r.op === "withdraw" && FIT_OPS.has(byId.get(r.supersedes ?? "")?.op ?? "")));
+						};
+						if (ids.some(fit)) throw new Refusal("Sign in first: fit edits carry the name you're signed in with.");
+					}
 					return json$3(res, 200, { ids: writeAll(root, undoRecords(root, by, label, ids)) });
 				}
 				return json$3(res, 200, { ids: await withBuild("Validate", async () => {
 					const resolved = await client();
 					if (misfiled(root, indexDocuments(root)).findings.length) throw new Refusal(misfiledFirst("validate"));
-					const accepts = acceptAll(root, by);
+					const accepts = acceptAll(root, by, await reviewerFirm());
 					const written = accepts.length ? writeAll(root, accepts) : [];
 					await rebuild(landscapeDir, root, resolved);
 					return written;
@@ -3538,6 +3959,72 @@ function decisionsHandler(landscapeDir, who, reviewer = who, client = async () =
 				return json$3(res, 500, { error: "The change couldn't be saved; see the server log." });
 			}
 		})();
+	};
+}
+//#endregion
+//#region fit.ts
+function send$2(res, status, value) {
+	res.statusCode = status;
+	res.setHeader("Content-Type", "application/json; charset=utf-8");
+	res.setHeader("Cache-Control", "no-store");
+	res.setHeader("X-Content-Type-Options", "nosniff");
+	res.end(JSON.stringify(value));
+}
+/** The fit for the working folder's client, or why there's none: a plain reason the page shows. */
+function readFit(root, client) {
+	if (!client) return {
+		available: false,
+		reason: "The fit is for a client's map: sign in, or set the client, to see it."
+	};
+	if (!hasFit(root, client)) return {
+		available: false,
+		reason: `The working folder has no fit for this client yet (client/${client}/fit/).`
+	};
+	const spec = readSpec(root, client);
+	const { structure, entries } = loadLandscape(root, client);
+	const curated = curate(structure, entries, { client });
+	const fit = fitParams(spec, entries, {
+		client,
+		preview: openSets(entries)
+	});
+	const accepted = fitParams(spec, entries, { client });
+	return {
+		available: true,
+		client,
+		spec: {
+			axes: spec.axes,
+			motivations: spec.motivations,
+			bands: spec.bands
+		},
+		params: fit.params,
+		acceptedParams: accepted.params,
+		history: fit.history,
+		conflicts: fit.conflicts,
+		problems: fit.problems,
+		rows: readRows(root, client, curated),
+		leaders: readLeaders(root, client)
+	};
+}
+function fitHandler(beforeRead = async () => null) {
+	return (req, res, next) => {
+		if ((req.url ?? "").split("?")[0] !== "/workspace/fit") return next();
+		if (!/^(127\.0\.0\.1|localhost):\d+$/.test(req.headers.host ?? "") || !LOOPBACK.has(req.socket.remoteAddress ?? "")) return send$2(res, 403, { error: "Forbidden" });
+		if (req.method !== "GET") return send$2(res, 405, { error: "Method not allowed" });
+		const root = workingFolder();
+		if (!root) return send$2(res, 404, { error: "No working folder" });
+		beforeRead(root).catch(() => null).then(() => {
+			try {
+				send$2(res, 200, readFit(root, clientId()));
+			} catch (error) {
+				const message = error.message;
+				if (/fit\/spec\.json can't be used/.test(message)) return send$2(res, 200, {
+					available: false,
+					reason: message
+				});
+				console.error(`[fit] ${error.code ?? error.name}`);
+				send$2(res, 500, { error: "The fit couldn't be read; see the server log." });
+			}
+		});
 	};
 }
 //#endregion
@@ -4883,15 +5370,23 @@ var callWith = (token) => (route, init, timeoutMs) => worker(route, token, init,
 var signedInCall = async () => callWith(await signedInToken());
 var signIn = null;
 var signedInAs = null;
-/** The signed-in person's email, checked with the admin Worker at most every two minutes; null when not signed in. */
-async function signedInEmail() {
-	if (signedInAs && Date.now() - signedInAs.at < 12e4) return signedInAs.email;
+async function signedInPerson() {
+	if (signedInAs && Date.now() - signedInAs.at < 12e4) return signedInAs;
 	const now = await session();
 	signedInAs = now.signedIn && now.email ? {
 		email: now.email,
+		firm: now.firm ?? null,
 		at: Date.now()
 	} : null;
-	return signedInAs?.email ?? null;
+	return signedInAs;
+}
+/** The signed-in person's email, checked with the admin Worker at most every two minutes; null when not signed in. */
+async function signedInEmail() {
+	return (await signedInPerson())?.email ?? null;
+}
+/** The signed-in person's firm on the team list (parallel or goco), as the admin Worker says; null when not signed in. */
+async function signedInFirm() {
+	return (await signedInPerson())?.firm ?? null;
 }
 var workerClient = null;
 /** The client id the admin Worker serves (whoami), checked with it at most every two minutes; null when it has none. */
@@ -4962,6 +5457,7 @@ async function readSession() {
 		};
 		const client = typeof me.client === "string" && /^[\p{L}\p{N}][\p{L}\p{N}&.' -]{0,59}$/u.test(me.client) ? me.client : void 0;
 		const role = me.role === "admin" ? "admin" : "member";
+		const firm = me.firm === "parallel" || me.firm === "goco" ? me.firm : void 0;
 		const portals = portalLinks(me.portals);
 		return {
 			cloudflared: true,
@@ -4969,6 +5465,7 @@ async function readSession() {
 			signingIn: false,
 			email: me.email,
 			role,
+			...firm ? { firm } : {},
 			...client ? { client } : {},
 			...portals ? { portals } : {}
 		};
@@ -6464,7 +6961,8 @@ function startServer({ port, appDir, mapDir, landscapeDir, token, version }) {
 		publishHandler(),
 		cloudflareHandler(() => buildRunning() ?? publishBusy()),
 		workspaceHandler(path.join(landscapeDir, "rules"), learnClient),
-		decisionsHandler(landscapeDir, async () => await signedInEmail() ?? await whoFromEnvironment(), signedInEmail, () => workingStateClient({ offline: true })),
+		decisionsHandler(landscapeDir, async () => await signedInEmail() ?? await whoFromEnvironment(), signedInEmail, () => workingStateClient({ offline: true }), signedInFirm, signedInEmail),
+		fitHandler(learnClient),
 		mapSettingsHandler(async () => await signedInEmail() ?? await whoFromEnvironment()),
 		rulesHandler(async () => await signedInEmail() ?? await whoFromEnvironment()),
 		mapHandler(mapDir, token),
